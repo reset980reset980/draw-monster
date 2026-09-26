@@ -1,0 +1,12 @@
+# 배포에는 게임 파일만 (개발용 스크립트·문서 제외)
+/*
+!/index.html
+!/game.js
+!/sim.js
+!/sfx.js
+!/tour.js
+!/qrcode.js
+!/style.css
+!/manifest.json
+!/version.txt
+!/*.png

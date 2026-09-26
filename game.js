@@ -1,6 +1,6 @@
 // かいて！モンスターバトル — 描く画面（からだ・うで・あし）・バトルの描画・勝ち抜き・モンスターを送る
 'use strict';
-const VERSION = '40';
+const VERSION = '41';
 // あそびの きろく（/t.js。なくても うごく）
 window.T_VER = VERSION;
 function TR(e, d) { try { if (window.T) window.T(e, d); } catch (err) {} }
@@ -15,6 +15,13 @@ let W = 0, H = 0, DPR = 1;
 const ME = { name: '나', color: '#1e88e5' };
 const FRIEND = { name: '친구', color: '#2e7d32' };
 const P2 = { name: '2P', color: '#e53935' };
+// 몬스터 이름 (최대 8글자). 공유 링크에 &n= 으로 같이 보냄
+function cleanName(t) { return String(t || '').replace(/[<>&"'\\\u0000-\u001f]/g, '').trim().slice(0, 8); }
+function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+let myName = '';
+function dispName() { return myName || ME.name; }
+// 대결 화면 왼쪽(A) 선수의 이름·색 — 연승전은 내 몬스터, 둘이서 대결은 1P, 토너먼트는 참가자
+let pA = { name: ME.name, color: ME.color };
 // ふたりで たたかう（ひとつの端末で 1P → 2P の順に描く）。vs = { step: 1|2, d1, d2, backup }。この間は 勝ち抜き・保存中のモンスターに さわらない
 let vs = null;
 // 王冠: うら 5 人抜きした モンスター（形そのもの）。1 本でも 描きなおすと べつの モンスター
@@ -66,6 +73,11 @@ function resetRun() { stage = 0; lsSet(sk('stage'), '0'); }
 function resetAllRuns() { stage = 0; lsSet('stage', '0'); lsSet('ura.stage', '0'); }
 let friendRobot = null;
 { const m = /[#&]r=([A-Za-z0-9_-]+)/.exec(location.hash); if (m) friendRobot = RB.decodeDesign(m[1]); }
+{ const m = /[#&]n=([^&]+)/.exec(location.hash); if (m && friendRobot) { try { const n = cleanName(decodeURIComponent(m[1])); if (n) FRIEND.name = n; } catch (e) {} } }
+myName = cleanName(lsGet('name'));
+// 토너먼트 참가자를 이 기기에서 그리는 중인지 (그동안 내 몬스터·기록은 건드리지 않음)
+let tourDraw = null;
+const tempDraw = () => !!(vs || tourDraw);
 
 // ---------- 画面 ----------
 function resize() {
@@ -75,9 +87,9 @@ function resize() {
   sizePad(); if (mode === 'draw') drawPad();
 }
 window.addEventListener('resize', resize);
-function show(id) { document.body.classList.toggle('inbattle', id === 'none'); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
+function show(id) { document.body.classList.toggle('inbattle', id === 'none'); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff', 'tourbox']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
 // はやおくり: 一度でも倒した CPU との戦いだけ
-function canFast() { return mode === 'battle' && !isFriend && !!beaten[S && S.stage != null ? S.stage : stage]; }
+function canFast() { if (mode !== 'battle' || !S) return false; if (S.side === 'tour') return true; return !isFriend && !!beaten[S.stage != null ? S.stage : stage]; }
 function updateFastBtn() { $('fast').textContent = fast ? '▶ 보통 속도' : '▶▶ 빨리 감기'; $('fast').classList.toggle('on', fast); }
 
 let mode = 'title', part = 'body';
@@ -85,6 +97,7 @@ function showTitle() {
   mode = 'title'; show('title'); SFX.music('title');
   $('friendbox').hidden = !friendRobot;
   if (friendRobot) drawPreview($('friendprev'), friendRobot, FRIEND.color);
+  $('fbtitle').textContent = FRIEND.name !== '친구' ? '친구 몬스터 「' + FRIEND.name + '」 도착!' : '친구의 몬스터가 도착했어!';
   renderHall();
   const ob = +(lsGet('best') || 0), ub = +(lsGet('ura.best') || 0);
   $('tprog').textContent = (ob > 0 ? '기본 최고 ' + ob + '연승' + (uraOpen ? '(달성!)' : '') : '') + (uraOpen ? '　히든 최고 ' + ub + '연승' + (lsGet('ura.cleared') === '1' ? '(달성!!)' : '') : '');
@@ -97,6 +110,9 @@ function showDraw() {
   mode = 'draw'; show('draw'); SFX.music('title');
   if (!strokes.body) part = 'body'; else if (!strokes.arm) part = 'arm'; else if (!strokes.leg) part = 'leg';
   $('fightfriend').hidden = !friendRobot;
+  $('namerow').hidden = !!vs;
+  $('mname').value = tourDraw ? tourDraw.name : myName;
+  $('mname').placeholder = tourDraw ? '참가자 이름 (예: 민준)' : '몬스터 이름 (안 써도 돼)';
   updateSideUi();
   setPart(part);
   if (vs) setHint((vs.step === 1 ? '1P' : '2P') + ' 몬스터를 그려 줘' + (myRobot ? '(전에 그린 몬스터가 들어 있어)' : ''));
@@ -273,7 +289,7 @@ const endStroke = () => {
   const need = part === 'body' ? 80 : 20;
   if (pts.length < 2 || RB.inkOf(pts) < need) { setHint('조금 더 크게 그려 줘'); drawPad(); return; }
   strokes[part] = pts;
-  if (!vs && (stage > 0 || +(lsGet('stage') || 0) > 0 || +(lsGet('ura.stage') || 0) > 0)) { resetAllRuns(); updateSideUi(); }
+  if (!tempDraw() && (stage > 0 || +(lsGet('stage') || 0) > 0 || +(lsGet('ura.stage') || 0) > 0)) { resetAllRuns(); updateSideUi(); }
   if (part === 'body' && (strokes.arm || strokes.leg)) setHint('몸을 바꿔서 팔·다리도 다시 붙였어');
   else setHint('');
   saveRobot();
@@ -287,10 +303,16 @@ function saveRobot() {
   myRobot = null;
   if (strokes.body && strokes.arm && strokes.leg) {
     const d = RB.design(strokes.body, strokes.arm, strokes.leg);
-    if (RB.validDesign(d)) { myRobot = withCrown(d); if (!vs) lsSet('robot', RB.encodeDesign(d)); }
+    if (RB.validDesign(d)) { myRobot = withCrown(d); if (!tempDraw()) lsSet('robot', RB.encodeDesign(d)); }
   }
   updateButtons();
 }
+$('mname').addEventListener('input', () => {
+  const n = cleanName($('mname').value);
+  if (tourDraw) tourDraw.name = n;
+  else if (!vs) { myName = n; lsSet('name', n); }
+});
+$('mname').addEventListener('keydown', e => { if (e.key === 'Enter') $('mname').blur(); });
 function setHint(t) { $('hint').textContent = t; }
 function updateButtons() { $('fight').disabled = !myRobot; $('fightfriend').disabled = !myRobot; $('send').disabled = !myRobot; updateStats(); }
 // つよさのバー（モンスターができているときだけ）
@@ -311,6 +333,7 @@ const INTRO = 1500, INTRO_FIGHT = 700;
 function startBattle(friend) {
   if (!myRobot) return;
   isFriend = !!friend;
+  pA = { name: dispName(), color: ME.color };
   opp = friend ? { name: FRIEND.name, color: FRIEND.color, d: friendRobot } : { name: CPUS()[stage].name, color: CPUS()[stage].color, d: CPUS()[stage] };
   S = RB.create(myRobot, opp.d); S.stage = stage; S.side = friend ? 'friend' : side; S.crownA = !!myRobot.crown; S.crownB = !!opp.d.crown;
   TR('battle', { side: S.side, stage: stage, opp: opp.name, me: RB.encodeDesign(myRobot), st: stat4(myRobot), crown: !!myRobot.crown, fast: fast });
@@ -398,7 +421,7 @@ function renderBattle(dt) {
   ctx.fillStyle = '#7c83ff'; ctx.fillRect(-RB.HW, 0, 2 * RB.HW, 5);
   ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.lineWidth = 2;
   for (let x = -RB.HW; x <= RB.HW; x += 60) { ctx.beginPath(); ctx.moveTo(x, 5); ctx.lineTo(x * 1.3, 120); ctx.stroke(); }
-  for (const k of ['B', 'A']) drawRobotWorld(S[k], k === 'A' ? ME.color : opp.color, hurt[k] > 0, k === 'A' ? S.crownA : S.crownB);
+  for (const k of ['B', 'A']) drawRobotWorld(S[k], k === 'A' ? pA.color : opp.color, hurt[k] > 0, k === 'A' ? S.crownA : S.crownB);
   for (const k of ['A', 'B']) if (hurt[k] > 0) hurt[k]--;
   drawFx();
   // かけら・数字
@@ -463,19 +486,20 @@ function drawHud() {
     ctx.font = '900 12px sans-serif'; ctx.fillStyle = '#fff'; ctx.textAlign = right ? 'right' : 'left';
     ctx.fillText(Math.ceil(hp), right ? x + bw - 4 : x + 4, top + 35);
   };
-  bar(12, S.A.hp, S.A.maxHp, S.side === 'vs' ? '1P' : ME.name, ME.color, false);
+  bar(12, S.A.hp, S.A.maxHp, pA.name, pA.color, false);
   bar(W - 12 - bw, S.B.hp, S.B.maxHp, opp.name, S.side === 'ura' ? '#ff5252' : opp.color, true);   // うらの敵は色が暗いので バーは赤
   ctx.textAlign = 'center'; ctx.font = '900 26px sans-serif'; ctx.fillStyle = S.t > RB.TIME - 5 ? '#ff8a80' : '#fff';
   ctx.fillText(Math.max(0, Math.ceil(RB.TIME - S.t)), W / 2, top + 34);
-  if (!isFriend) { ctx.font = '700 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText((S.side === 'ura' ? '히든 ' : '') + '연승전 ' + (S.stage + 1) + ' / ' + CPUS().length, W / 2, top + 54); }
+  if (S.label) { ctx.font = '700 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText(S.label, W / 2, top + 54); }
+  else if (!isFriend) { ctx.font = '700 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText((S.side === 'ura' ? '히든 ' : '') + '연승전 ' + (S.stage + 1) + ' / ' + CPUS().length, W / 2, top + 54); }
   const now = performance.now(), ease = k => 1 - Math.pow(1 - Math.max(0, Math.min(1, k)), 3);
   if (introUntil && now < introUntil) {
     const t = INTRO - (introUntil - now);
-    if (t < INTRO - INTRO_FIGHT) big(isFriend || S.side === 'vs' ? '준비!' : (S.side === 'ura' ? '히든 ' : '') + '라운드 ' + (S.stage + 1), '#ffffff', Math.min(1, t / 150), 1.5 - 0.5 * ease(t / 250));
+    if (t < INTRO - INTRO_FIGHT) big(S.label ? S.label : isFriend || S.side === 'vs' ? '준비!' : (S.side === 'ura' ? '히든 ' : '') + '라운드 ' + (S.stage + 1), '#ffffff', Math.min(1, t / 150), 1.5 - 0.5 * ease(t / 250));
     else { const k = (t - (INTRO - INTRO_FIGHT)) / 180; big('파이트!', '#ffd54f', 1, 2.2 - 1.2 * ease(k)); }
   } else if (S.t < 0.5) big('파이트!', '#ffd54f', 1 - S.t / 0.5);
   if (S.over) {
-    const wc = S.side === 'vs' || S.winner === 'A' ? '#ffd54f' : '#ff5252';
+    const wc = S.side === 'vs' || S.side === 'tour' || S.winner === 'A' ? '#ffd54f' : '#ff5252';
     if (S.reason === 'ko') {
       const k = koT ? (now - koT) / 260 : 9;
       big('K.O.', wc, 1, 2.6 - 1.6 * ease(k));
@@ -550,6 +574,7 @@ function showResult() {
   TR('result', { side: S.side, stage: S.stage, opp: opp && opp.name, win: S.winner === 'A' ? 'win' : S.winner === 'B' ? 'lose' : 'draw', reason: S.reason, t: Math.round(S.t * 10) / 10, hp: [Math.ceil(S.A.hp), Math.ceil(S.B.hp)], hits: [S.A.hits, S.B.hits], dmg: [Math.round(S.A.dealt), Math.round(S.B.dealt)], fast: fast });
   $('share').hidden = false; $('vstitle').hidden = true; $('redraw').hidden = false; $('redraw').textContent = '몬스터 고치기';
   $('next').textContent = '다음 상대로'; $('next').classList.remove('ura'); $('again').className = 'main'; goUra = false;
+  if (S.side === 'tour') { tourResult(); return; }
   if (S.side === 'vs') {
     $('rtitle').textContent = S.winner === 'A' ? '1P 승리!' : S.winner === 'B' ? '2P 승리!' : '무승부';
     $('rtitle').className = 'rtitle ' + (S.winner ? 'win' : '');
@@ -595,12 +620,29 @@ function showResult() {
 function shareRobot() {
   if (!myRobot) return;
   TR('share', { me: RB.encodeDesign(myRobot) });
-  const url = SITE_URL + '#r=' + RB.encodeDesign(myRobot);
-  const text = '내 몬스터랑 싸워 봐! (그려라! 몬스터 배틀)\n' + url;
-  if (navigator.share) navigator.share({ text }).catch(err => { if (!err || err.name !== 'AbortError') showShareBox(text); });
-  else showShareBox(text);
+  const url = SITE_URL + '#r=' + RB.encodeDesign(myRobot) + (myName ? '&n=' + encodeURIComponent(myName) : '');
+  const text = (myName ? '「' + myName + '」 — ' : '') + '내 몬스터랑 싸워 봐! (그려라! 몬스터 배틀)\n' + url;
+  showShareBox('몬스터 보내기', '친구 폰 카메라로 QR을 찍으면 바로 대결할 수 있어!', text, url);
 }
-function showShareBox(text) { $('sharetext').value = text; $('sharebox').hidden = false; }
+// QR 코드 + 글 (보내기·게임 주소 공용)
+let shareText = '';
+function showShareBox(title, note, text, url) {
+  shareText = text;
+  $('sharetitle').textContent = title; $('sharenote').textContent = note; $('sharetext').value = text;
+  drawQR($('qr'), url);
+  $('nativeshare').hidden = !navigator.share;
+  $('sharebox').hidden = false;
+}
+function drawQR(cv, url) {
+  const g = cv.getContext('2d');
+  try {
+    const q = qrcode(0, 'M'); q.addData(url); q.make();
+    const n = q.getModuleCount(), m = 2, px = Math.floor(cv.width / (n + m * 2)), off = Math.floor((cv.width - px * n) / 2);
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.fillStyle = '#000';
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (q.isDark(y, x)) g.fillRect(off + x * px, off + y * px, px, px);
+  } catch (e) { g.clearRect(0, 0, cv.width, cv.height); }
+}
+onTap($('nativeshare'), () => { if (navigator.share) navigator.share({ text: shareText }).catch(() => {}); });
 
 // ---------- ボタン ----------
 // 버튼 누르는 소리 · 소리 켜고 끄기
@@ -612,15 +654,15 @@ function onTap(el, fn) { el.addEventListener('click', e => { e.preventDefault();
 onTap($('start'), showDraw);
 // タイトルの文字を 5 回つづけてタップ → うら テストの印（ホーム画面のアプリは Safari と保存場所が別なので）
 { let n = 0, t0 = 0; $('title').querySelector('.logo').addEventListener('click', () => { const now = Date.now(); n = now - t0 < 800 ? n + 1 : 1; t0 = now; if (n >= 5) { n = 0; lsSet('uratest', '1'); URA_TEST = true; uraOpen = true; showTitle(); } }); }
-onTap($('back'), () => { if (vs) exitVs(); else showTitle(); });
-onTap($('fight'), () => { if (vs) vsNext(); else startBattle(false); });
+onTap($('back'), () => { if (tourDraw) tourDrawCancel(); else if (vs) exitVs(); else showTitle(); });
+onTap($('fight'), () => { if (tourDraw) tourDrawDone(); else if (vs) vsNext(); else startBattle(false); });
 onTap($('fightfriend'), () => startBattle(true));
 onTap($('send'), shareRobot);
 onTap($('share'), shareRobot);
-onTap($('clearpart'), () => { SFX.play('erase'); strokes[part] = null; if (!vs) resetAllRuns(); saveRobot(); setPart(part); updateSideUi(); });
+onTap($('clearpart'), () => { SFX.play('erase'); strokes[part] = null; if (!tempDraw()) resetAllRuns(); saveRobot(); setPart(part); updateSideUi(); });
 let goUra = false;   // おもてを クリアした 直後: つぎへ ボタンが「うらへ」
-onTap($('next'), () => { if (vs) startVsMode(); else if (goUra) { goUra = false; side = 'ura'; lsSet('side', side); loadSide(); updateSideUi(); TR('gotoura', { from: 'result' }); startBattle(false); } else startBattle(false); });
-onTap($('again'), () => { if (S && S.side === 'vs') startVsBattle(); else startBattle(isFriend); });
+onTap($('next'), () => { if (S && S.side === 'tour') showTour(); else if (vs) startVsMode(); else if (goUra) { goUra = false; side = 'ura'; lsSet('side', side); loadSide(); updateSideUi(); TR('gotoura', { from: 'result' }); startBattle(false); } else startBattle(false); });
+onTap($('again'), () => { if (S && S.side === 'tour') startTourMatch(tour.cur); else if (S && S.side === 'vs') startVsBattle(); else startBattle(isFriend); });
 onTap($('redraw'), () => { if (vs) startVsMode(); else showDraw(); });
 // ---------- うら 5 人抜き: 王冠・でんどういり・エンディング ----------
 let endT0 = 0, confetti = [];
@@ -698,7 +740,7 @@ onTap($('vs'), startVsMode);
 onTap($('vstitle'), exitVs);
 onTap($('handoffgo'), () => { vs.step = 2; loadInto(vsLast(2)); showDraw(); });
 // ---------- ふたりで たたかう ----------
-function padColor() { return vs && vs.step === 2 ? P2.color : ME.color; }
+function padColor() { return tourDraw ? tourDraw.color : vs && vs.step === 2 ? P2.color : ME.color; }
 // 直前の 1P・2P の モンスター（端末に 覚えておく。次の ふたりで たたかう は これが 入った状態で 始まる）
 function vsLast(n) { const w = lsGet('vs.d' + n); return w ? RB.decodeDesign(w) : null; }
 function loadInto(d) { if (d) { strokes = { body: d.body, arm: d.arm, leg: d.leg }; myRobot = d; } else { strokes = { body: null, arm: null, leg: null }; myRobot = null; } }
@@ -727,6 +769,7 @@ function vsNext() {
 }
 function startVsBattle() {
   isFriend = true;   // 勝ち抜きの記録には 入れない
+  pA = { name: '1P', color: ME.color };
   opp = { name: P2.name, color: P2.color, d: vs.d2 };
   S = RB.create(vs.d1, vs.d2); S.stage = 0; S.side = 'vs'; S.crownA = !!vs.d1.crown; S.crownB = !!vs.d2.crown;
   TR('battle', { side: 'vs', p1: RB.encodeDesign(vs.d1), p2: RB.encodeDesign(vs.d2), st1: stat4(vs.d1), st2: stat4(vs.d2) });
@@ -754,8 +797,8 @@ function renderSlots(msg) {
       e.preventDefault();
       if (!d) return;
       const same = myRobot && RB.encodeDesign(myRobot) === RB.encodeDesign(d);
-      myRobot = d; strokes = { body: d.body, arm: d.arm, leg: d.leg }; if (!vs) lsSet('robot', RB.encodeDesign(d));
-      const reset = !vs && !same && (+(lsGet('stage') || 0) > 0 || +(lsGet('ura.stage') || 0) > 0);
+      myRobot = d; strokes = { body: d.body, arm: d.arm, leg: d.leg }; if (!tempDraw()) lsSet('robot', RB.encodeDesign(d));
+      const reset = !tempDraw() && !same && (+(lsGet('stage') || 0) > 0 || +(lsGet('ura.stage') || 0) > 0);
       if (reset) resetAllRuns();
       $('slotbox').hidden = true; setPart('leg'); updateSideUi();
       setHint(reset ? i + '번을 불러와서 연승전은 첫 상대부터 다시' : i + '번을 불러왔어');
@@ -773,13 +816,13 @@ function updateSideUi() {
   $('sidebtn').classList.toggle('ura', side === 'ura');
   $('fight').innerHTML = (side === 'ura' ? '히든 ' : '') + '싸우기<small>' + (stage + 1) + ' / ' + CPUS().length + ' ' + CPUS()[stage].name + '</small>';
   $('fight').classList.toggle('ura', side === 'ura');
-  applyVsUi();
+  applyVsUi(); if (typeof applyTourUi === 'function') applyTourUi();
 }
 // おもて ⇄ うら（押すたびに切りかえ）
 onTap($('sidebtn'), () => { side = side === 'ura' ? 'omote' : 'ura'; lsSet('side', side); loadSide(); updateSideUi(); setHint(side === 'ura' ? '히든 연승전: 엄청나게 센 5마리' : ''); });
 onTap($('fast'), () => { fast = !fast; TR('fast', { on: fast }); lsSet('fast', fast ? '1' : '0'); updateFastBtn(); });
 // 戦いの途中で もどる（勝ち抜きの途中経過は そのまま。戦いは決定的なので やめても 得はしない）
-onTap($('quit'), () => { if (mode === 'battle' || mode === 'pause') { TR('quit', { side: S && S.side, stage: S && S.stage, t: S && Math.round(S.t * 10) / 10 }); showDraw(); } });
+onTap($('quit'), () => { if ((mode === 'battle' || mode === 'pause') && S && S.side === 'tour') { showTour(); return; } if (mode === 'battle' || mode === 'pause') { TR('quit', { side: S && S.side, stage: S && S.stage, t: S && Math.round(S.t * 10) / 10 }); showDraw(); } });
 onTap($('closeshare'), () => { $('sharebox').hidden = true; });
 onTap($('copy'), () => {
   const ta = $('sharetext'); ta.select();

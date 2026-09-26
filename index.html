@@ -6,14 +6,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#15173a">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=40">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=41">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-title" content="몬스터 배틀">
 <meta property="og:title" content="그려라! 몬스터 배틀">
 <meta property="og:description" content="몸·팔·다리를 그려서 몬스터를 만들자! 몬스터가 걸어가서 펀치로 싸워. 친구에게 몬스터를 보내서 한판 붙자!">
 <title>그려라! 몬스터 배틀</title>
-<link rel="stylesheet" href="style.css?v=40">
-<script src="/t.js?v=1"></script>
+<link rel="stylesheet" href="style.css?v=41">
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -26,13 +25,14 @@
     <div class="logo">그려라!<br>몬스터 배틀</div>
     <div class="lead">몸·팔·다리를 그리면<br>몬스터가 싸워!</div>
     <div id="friendbox" hidden>
-      <div class="fb-title">친구의 몬스터가 도착했어!</div>
+      <div class="fb-title" id="fbtitle">친구의 몬스터가 도착했어!</div>
       <canvas id="friendprev" width="240" height="240"></canvas>
     </div>
     <div id="tprog"></div>
     <div class="tbtns">
       <button id="start" class="main">몬스터 만들기</button>
       <button id="vs" class="sub vsbtn">둘이서 대결</button>
+      <button id="tourbtn" class="sub tourbtn">🏆 학급 토너먼트</button>
     </div>
     <div id="hallbox" hidden>
       <div class="hall-title">👑 명예의 전당</div>
@@ -66,6 +66,7 @@
     <button class="tab" data-part="leg">다리</button>
   </div>
   <div class="dhead" id="dhead"></div>
+  <div id="namerow"><input id="mname" maxlength="8" autocomplete="off" enterkeyhint="done"></div>
   <canvas id="pad"></canvas>
   <div id="hint"></div>
   <div class="stats" id="stats">
@@ -122,20 +123,31 @@
   </div>
 </div>
 
+<div id="tourbox" hidden>
+  <div class="panel">
+    <div class="rtitle">🏆 학급 토너먼트</div>
+    <div id="tourbody"></div>
+  </div>
+</div>
+
 <div id="sharebox" hidden>
   <div class="panel">
-    <div class="rtitle">몬스터 보내기</div>
-    <div class="note">이 글을 카카오톡 등으로 친구에게 보내 줘</div>
+    <div class="rtitle" id="sharetitle">몬스터 보내기</div>
+    <div class="note" id="sharenote"></div>
+    <canvas id="qr" width="330" height="330"></canvas>
     <textarea id="sharetext" readonly></textarea>
     <div class="rbtns">
-      <button id="copy" class="main">글 복사</button>
+      <button id="nativeshare" class="main">카톡 등으로 보내기</button>
+      <button id="copy" class="sub">글 복사</button>
       <button id="closeshare" class="sub">닫기</button>
     </div>
   </div>
 </div>
 
-<script src="sim.js?v=40"></script>
-<script src="sfx.js?v=40"></script>
-<script src="game.js?v=40"></script>
+<script src="sim.js?v=41"></script>
+<script src="sfx.js?v=41"></script>
+<script src="qrcode.js?v=41"></script>
+<script src="game.js?v=41"></script>
+<script src="tour.js?v=41"></script>
 </body>
 </html>
