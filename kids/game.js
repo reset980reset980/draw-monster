@@ -1,0 +1,971 @@
+// かいて！モンスターバトル — 描く画面（からだ・うで・あし）・バトルの描画・勝ち抜き・モンスターを送る
+'use strict';
+const VERSION = '1';
+// あそびの きろく（/t.js。なくても うごく）
+window.T_VER = VERSION;
+function TR(e, d) { try { if (window.T) window.T(e, d); } catch (err) {} }
+function stat4(d) { const st = RB.robotStats(d); return [st.hp, Math.round(st.punch * 10) / 10, Math.round(st.reach), Math.round(st.speed * 10) / 10]; }
+// ホーム画面から開いていないとき（Safari の中）は 下のバーぶん あける
+if (!(window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches))) document.body.classList.add('browser');   // version.txt と合わせる。更新したら index.html の ?v= も上げる
+const SITE_URL = location.origin + location.pathname;   // 배포한 주소를 그대로 공유 링크로 사용
+
+const $ = id => document.getElementById(id);
+const cv = $('game'), ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+const ME = { name: '나', color: '#1e88e5' };
+const FRIEND = { name: '친구', color: '#2e7d32' };
+const P2 = { name: '2P', color: '#e53935' };
+// 몬스터 이름 (최대 8글자). 공유 링크에 &n= 으로 같이 보냄
+function cleanName(t) { return String(t || '').replace(/[<>&"'\\\u0000-\u001f]/g, '').trim().slice(0, 8); }
+function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+let myName = '';
+function dispName() { return myName || ME.name; }
+// 대결 화면 왼쪽(A) 선수의 이름·색 — 연승전은 내 몬스터, 둘이서 대결은 1P, 토너먼트는 참가자
+let pA = { name: ME.name, color: ME.color };
+// ふたりで たたかう（ひとつの端末で 1P → 2P の順に描く）。vs = { step: 1|2, d1, d2, backup }。この間は 勝ち抜き・保存中のモンスターに さわらない
+let vs = null;
+// 王冠: うら 5 人抜きした モンスター（形そのもの）。1 本でも 描きなおすと べつの モンスター
+function plainCode(d) { return RB.encodeDesign({ body: d.body, arm: d.arm, leg: d.leg }); }
+function crownedList() { try { return JSON.parse(lsGet('crowned') || '[]'); } catch (e) { return []; } }
+function isCrowned(d) { return !!d && crownedList().includes(plainCode(d)); }
+function withCrown(d) { if (d) d.crown = d.crown || isCrowned(d); return d; }
+const PARTS = { body: '몸', arm: '팔', leg: '다리' };
+const PART_HINT = {
+  body: '<b>몸</b>을 동그랗게 둘러서 그려 줘',
+  arm: '<b>어깨</b>(노란 ●)에서 <b>팔</b>을 그려 줘',
+  leg: '<b>허리</b>(노란 ●)에서 <b>다리</b>를 그려 줘',
+};
+
+// ---------- 記録 ----------
+const KEY = 'drawrobot.';
+function lsGet(k) { try { return localStorage.getItem(KEY + k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(KEY + k, v); } catch (e) {} }
+// うら の並びを 変えたときは うら の途中経過と「倒したことがある」を 消す
+const URA_VER = '2';
+try { if (lsGet('uraver') !== URA_VER) { localStorage.removeItem(KEY + 'ura.stage'); localStorage.removeItem(KEY + 'ura.beaten'); lsSet('uraver', URA_VER); } } catch (e) {}
+try { if (lsGet('simv') !== String(RB.SIM_VERSION)) { localStorage.removeItem(KEY + 'stage'); localStorage.removeItem(KEY + 'ura.stage'); lsSet('simv', String(RB.SIM_VERSION)); } } catch (e) {}
+// 描きかけの線（3 本）と、完成したモンスター
+let strokes = { body: null, arm: null, leg: null };
+let myRobot = null;
+{ const w = lsGet('robot'); if (w) { const d = RB.decodeDesign(w); if (d) { myRobot = d; strokes = { body: d.body, arm: d.arm, leg: d.leg }; } } }
+// 勝ち抜きは おもて と うら（おもてを クリアすると 出る）。記録は べつべつ（うらは キーの頭に 'ura.'）
+// うら は おもてクリアで 出る（2026-09-26 に一般公開）。?uratest を開いた端末は クリア前でも 出る（オーナーのテスト用）
+if (/[?&]uratest(=|&|$)/.test(location.search)) lsSet('uratest', '1');
+let URA_TEST = lsGet('uratest') === '1';
+let uraOpen = URA_TEST || lsGet('cleared') === '1';   // おもてを クリアしたら 出る（オーナーの端末は テスト用に いつでも）
+let side = uraOpen && lsGet('side') === 'ura' ? 'ura' : 'omote';
+const sk = n => (side === 'ura' ? 'ura.' : '') + n;
+function CPUS() { return side === 'ura' ? RB.URA : RB.CPU; }
+let stage = 0, cleared = false, best = 0, beaten = [];
+function loadSide() {
+  stage = Math.min(CPUS().length - 1, +(lsGet(sk('stage')) || 0));
+  cleared = lsGet(sk('cleared')) === '1';
+  best = +(lsGet(sk('best')) || 0);   // さいこう 何人抜き
+  try { beaten = JSON.parse(lsGet(sk('beaten')) || '[]'); } catch (e) { beaten = []; }
+}
+loadSide();
+// 一度でも倒した CPU（はやおくり が使える）は beaten
+let fast = lsGet('fast') === '1';
+const FAST = 4;
+// 勝ち抜き: 途中でモンスターを変えたら 1 体目から。負けたら その挑戦は おわり
+function resetRun() { stage = 0; lsSet(sk('stage'), '0'); }
+// モンスターを描きかえたら おもて・うら 両方の途中経過を 1 たいめに
+function resetAllRuns() { stage = 0; lsSet('stage', '0'); lsSet('ura.stage', '0'); }
+let friendRobot = null;
+{ const m = /[#&]r=([A-Za-z0-9_-]+)/.exec(location.hash); if (m) friendRobot = RB.decodeDesign(m[1]); }
+{ const m = /[#&]n=([^&]+)/.exec(location.hash); if (m && friendRobot) { try { const n = cleanName(decodeURIComponent(m[1])); if (n) FRIEND.name = n; } catch (e) {} } }
+myName = cleanName(lsGet('name'));
+// 토너먼트 참가자를 이 기기에서 그리는 중인지 (그동안 내 몬스터·기록은 건드리지 않음)
+let tourDraw = null;
+const tempDraw = () => !!(vs || tourDraw);
+
+// ---------- 画面 ----------
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  sizePad(); if (mode === 'draw') drawPad();
+}
+window.addEventListener('resize', resize);
+function show(id) { document.body.classList.toggle('inbattle', id === 'none'); if (id === 'result') $('rhome').hidden = !!(S && S.side === 'vs'); document.body.classList.toggle('boardmode', id === 'board' || id === 'boardsetup'); document.body.classList.toggle('bigui', id === 'board' || id === 'boardsetup' || ((id === 'result' || id === 'none') && !!S && S.side === 'board')); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff', 'tourbox', 'board', 'boardsetup']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
+// はやおくり: 一度でも倒した CPU との戦いだけ
+function canFast() { if (mode !== 'battle' || !S) return false; if (S.side === 'tour') return true; return !isFriend && !!beaten[S.stage != null ? S.stage : stage]; }
+function updateFastBtn() { $('fast').textContent = fast ? '▶ 보통 속도' : '▶▶ 빨리 감기'; $('fast').classList.toggle('on', fast); }
+
+let mode = 'title', part = 'body';
+function showTitle() {
+  mode = 'title'; show('title'); SFX.music('title');
+  $('friendbox').hidden = !friendRobot;
+  if (friendRobot) drawPreview($('friendprev'), friendRobot, FRIEND.color);
+  $('fbtitle').textContent = FRIEND.name !== '친구' ? '친구 몬스터 「' + FRIEND.name + '」 도착!' : '친구의 몬스터가 도착했어!';
+  renderHall();
+  const ob = +(lsGet('best') || 0), ub = +(lsGet('ura.best') || 0);
+  $('tprog').textContent = (ob > 0 ? '기본 최고 ' + ob + '연승' + (uraOpen ? '(달성!)' : '') : '') + (uraOpen ? '　히든 최고 ' + ub + '연승' + (lsGet('ura.cleared') === '1' ? '(달성!!)' : '') : '');
+  $('start').textContent = myRobot ? '몬스터 고르기' : '몬스터 만들기';
+
+  drawTitleBg();
+}
+function showDraw() {
+  TR('draw', null);
+  mode = 'draw'; show('draw'); SFX.music('title');
+  if (!strokes.body) part = 'body'; else if (!strokes.arm) part = 'arm'; else if (!strokes.leg) part = 'leg';
+  $('fightfriend').hidden = !friendRobot;
+  $('namerow').hidden = !!vs;
+  $('mname').value = tourDraw ? tourDraw.name : myName;
+  $('mname').placeholder = tourDraw ? '참가자 이름 (예: 민준)' : '몬스터 이름 (안 써도 돼)';
+  updateSideUi();
+  setPart(part);
+  if (vs) setHint((vs.step === 1 ? '1P' : '2P') + ' 몬스터를 그려 줘' + (myRobot ? '(전에 그린 몬스터가 들어 있어)' : ''));
+  else if (stage > 0) setHint('연승전 중: 몬스터를 바꾸면 첫 번째 상대부터 다시');
+  sizePad(); drawPad();   // 文字やボタンが決まってから 測る
+}
+function setPart(p) {
+  part = p;
+  for (const t of document.querySelectorAll('.tab')) {
+    t.classList.toggle('on', t.dataset.part === p);
+    t.classList.toggle('done', !!strokes[t.dataset.part]);
+  }
+  $('dhead').innerHTML = PART_HINT[p];
+  setHint(''); drawPad(); updateButtons();
+}
+for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', e => { e.preventDefault(); setPart(t.dataset.part); });
+
+// ---------- 描くパッド ----------
+const pad = $('pad'), pctx = pad.getContext('2d');
+const PW = RB.PAD.x1 - RB.PAD.x0, PH = RB.PAD.y1 - RB.PAD.y0;
+let PS = 300, raw = null;
+function setPadSize(w) {
+  PS = w;
+  pad.style.width = w + 'px'; pad.style.height = w * PH / PW + 'px';
+  pad.width = Math.round(w * DPR); pad.height = Math.round(w * PH / PW * DPR);
+}
+// パッドを いちど大きめにして、描く画面が はみ出したぶんだけ 縮める（Safari のバー・強さのバー・ボタンの高さは 画面ごとに ちがうので 測る）
+function sizePad() {
+  let w = Math.min(W - 32, 420 * PW / PH);
+  setPadSize(w);
+  const d = $('draw');
+  if (d.hidden) return;
+  const over = d.scrollHeight - d.clientHeight;
+  if (over > 0) setPadSize(Math.max(150, w - over * PW / PH - 4));
+}
+function toWorld(e) { const r = pad.getBoundingClientRect(); const s = PW / r.width; return [(e.clientX - r.left) * s + RB.PAD.x0, (e.clientY - r.top) * s + RB.PAD.y0]; }
+function current() {
+  // いま見せるモンスター（描いている途中の線も反映）
+  const s = Object.assign({}, strokes);
+  if (raw) s[part] = RB.cleanStroke(raw, RB.INK[part]);
+  if (!s.body || s.body.length < 3) return { body: s.body, arm: null, leg: null };
+  return RB.design(s.body, s.arm || [], s.leg || []);
+}
+function drawPad() {
+  const g = pctx, s = PS / PW;
+  g.setTransform(DPR * s, 0, 0, DPR * s, -RB.PAD.x0 * DPR * s, -RB.PAD.y0 * DPR * s);
+  g.fillStyle = '#1f2250'; g.fillRect(RB.PAD.x0, RB.PAD.y0, PW, PH);
+  g.strokeStyle = 'rgba(255,255,255,.07)'; g.lineWidth = 1;
+  for (let x = -100; x <= 100; x += 20) { g.beginPath(); g.moveTo(x, RB.PAD.y0); g.lineTo(x, RB.PAD.y1); g.stroke(); }
+  for (let y = -220; y <= 20; y += 20) { g.beginPath(); g.moveTo(RB.PAD.x0, y); g.lineTo(RB.PAD.x1, y); g.stroke(); }
+  const d = current();
+  if (d.body && d.body.length > 1) {
+    const full = d.arm !== null;
+    drawRobotLocal(g, d, padColor(), full ? 1 : 0.9, raw && part === 'body');
+    if (full) {
+      const blink = 0.55 + 0.45 * Math.sin(performance.now() / 250);
+      for (const [k, jp] of [['arm', d.shoulder], ['leg', d.hip]]) {
+        g.fillStyle = part === k ? 'rgba(255,214,0,' + blink + ')' : 'rgba(255,214,0,.35)';
+        g.beginPath(); g.arc(jp[0], jp[1], part === k ? 7 : 4, 0, 7); g.fill();
+      }
+    }
+  } else if (raw) { g.strokeStyle = padColor(); g.lineWidth = 4; pline(g, RB.cleanStroke(raw, RB.INK.body)); g.stroke(); }
+}
+// モンスターをパッド座標のまま描く（まっすぐ立った姿）
+function drawRobotLocal(g, d, color, alpha, open) {
+  g.globalAlpha = alpha; g.lineCap = 'round'; g.lineJoin = 'round';
+  // うしろの足（180° 反対）
+  if (d.leg && d.leg.length > 1) { const back = d.leg.map(p => [2 * d.hip[0] - p[0], 2 * d.hip[1] - p[1]]); limb(g, back, '#37474f', 0.55); }
+  body(g, d.body, color, open, d);
+  if (d.leg && d.leg.length > 1) limb(g, d.leg, '#455a64', 1);
+  if (d.arm && d.arm.length > 1) arm(g, d.arm, color);
+  if (d.crown && d.body && d.body.length > 2) {
+    const c = crownSpot(d.body.map(p => ({ x: p[0], y: p[1] })));
+    drawCrown(g, c.x, c.y - 1, c.s);
+  }
+  g.globalAlpha = 1;
+}
+// 王冠を のせる所: 体の いちばん上の あたり（上から 8 以内の 点）の まんなか
+function crownSpot(pts) {
+  let y0 = Infinity, x0 = Infinity, x1 = -Infinity;
+  for (const p of pts) { y0 = Math.min(y0, p.y); x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); }
+  let sx = 0, n = 0; for (const p of pts) if (p.y <= y0 + 8) { sx += p.x; n++; }
+  return { x: sx / n, y: y0, s: Math.max(18, Math.min(40, (x1 - x0) * 0.5)) };
+}
+// 王冠（見た目だけ）: x, y が 下のまんなか、s が はば
+function drawCrown(g, x, y, s) {
+  const h = s * 0.75;
+  g.beginPath();
+  g.moveTo(x - s / 2, y); g.lineTo(x + s / 2, y); g.lineTo(x + s / 2, y - h); g.lineTo(x + s / 4, y - h * 0.45);
+  g.lineTo(x, y - h * 1.05); g.lineTo(x - s / 4, y - h * 0.45); g.lineTo(x - s / 2, y - h); g.closePath();
+  g.fillStyle = '#ffd54f'; g.fill(); g.lineWidth = Math.max(2, s * 0.08); g.strokeStyle = '#7a5c00'; g.stroke();
+  g.fillStyle = '#e53935';
+  for (const [px, py] of [[x - s / 2, y - h], [x, y - h * 1.05], [x + s / 2, y - h]]) { g.beginPath(); g.arc(px, py, s * 0.09, 0, 7); g.fill(); }
+  g.fillStyle = '#42a5f5'; g.beginPath(); g.arc(x, y - h * 0.3, s * 0.1, 0, 7); g.fill();
+}
+function body(g, pts, color, open, d) {
+  pline(g, pts); if (!open) g.closePath();
+  if (!open) { g.fillStyle = color; g.fill(); }
+  g.strokeStyle = '#0d1030'; g.lineWidth = 4; g.stroke();
+  if (open) return;
+  // 光
+  g.save(); pline(g, pts); g.closePath(); g.clip();
+  g.fillStyle = 'rgba(255,255,255,.18)'; let y0 = Infinity, y1 = -Infinity, x0 = Infinity, x1 = -Infinity;
+  for (const p of pts) { y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); }
+  g.fillRect(x0, y0, x1 - x0, (y1 - y0) * 0.3);
+  g.restore();
+  // 目
+  if (d && d.shoulder) eyes(g, pts, d.shoulder);
+}
+function eyes(g, pts, sh) {
+  let y0 = Infinity, x0 = Infinity, x1 = -Infinity;
+  for (const p of pts) { y0 = Math.min(y0, p[1]); x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); }
+  const w = x1 - x0, ex = x0 + w * 0.62, ey = y0 + Math.min(22, w * 0.3 + 8), r = Math.max(3.5, Math.min(8, w * 0.1));
+  face(g, (x, y) => [x, y], ex, ey, r, 1, false);
+}
+// モンスターの顔: 目 2 つ ＋ キバの見える口。down（ダウン中）は バッテン目と あいた口
+// tf = 体の座標 → 描く座標（体が傾いていても顔が一緒に回る）
+function face(g, tf, ex, ey, r, facing, down) {
+  const pt = (x, y) => tf(ex + x, ey + y);
+  if (gentle()) { softFace(g, pt, r, facing, down); return; }
+  for (const dx of [-r * 1.4, r * 1.4]) {
+    if (down) {
+      g.strokeStyle = '#0d1030'; g.lineWidth = Math.max(1.5, r * 0.4); g.lineCap = 'round';
+      const a = pt(dx - r * 0.7, -r * 0.7), b = pt(dx + r * 0.7, r * 0.7), c = pt(dx - r * 0.7, r * 0.7), d = pt(dx + r * 0.7, -r * 0.7);
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.moveTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.stroke();
+      continue;
+    }
+    const e = pt(dx, 0), q = pt(dx + facing * r * 0.35, 0);
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(e[0], e[1], r, 0, 7); g.fill();
+    g.fillStyle = '#0d1030'; g.beginPath(); g.arc(q[0], q[1], r * 0.5, 0, 7); g.fill();
+  }
+  // 口（前寄り）とキバ
+  const mx = facing * r * 0.4, my = r * 2.2, mw = r * 1.6;
+  const L = pt(mx - mw, my), R = pt(mx + mw, my), C = pt(mx, my + (down ? r * 1.4 : r * 0.9));
+  g.fillStyle = '#0d1030'; g.beginPath(); g.moveTo(L[0], L[1]); g.quadraticCurveTo(C[0], C[1] + (C[1] - L[1]) * 0.6, R[0], R[1]); g.closePath(); g.fill();
+  g.fillStyle = '#fff';
+  for (const fx of [-0.55, 0.55]) {
+    const a = pt(mx + mw * fx - r * 0.3, my), b = pt(mx + mw * fx + r * 0.3, my), c = pt(mx + mw * fx, my + r * 0.55);
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.closePath(); g.fill();
+  }
+}
+// 순한 얼굴: 둥근 눈 + 웃는 입. 어질어질할 땐 빙글빙글 눈
+function softFace(g, pt, r, facing, down) {
+  for (const dx of [-r * 1.4, r * 1.4]) {
+    if (down) {
+      g.strokeStyle = '#0d1030'; g.lineWidth = Math.max(1.2, r * 0.28); g.lineCap = 'round'; g.beginPath();
+      for (let i = 0; i <= 24; i++) { const a = i / 24 * 12.6, rr = r * 0.9 * i / 24, p = pt(dx + Math.cos(a) * rr, Math.sin(a) * rr); i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); }
+      g.stroke(); continue;
+    }
+    const e = pt(dx, 0), q = pt(dx + facing * r * 0.35, 0), sh = pt(dx + facing * r * 0.1 - r * 0.2, -r * 0.3);
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(e[0], e[1], r, 0, 7); g.fill();
+    g.fillStyle = '#0d1030'; g.beginPath(); g.arc(q[0], q[1], r * 0.55, 0, 7); g.fill();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(sh[0], sh[1], r * 0.2, 0, 7); g.fill();
+  }
+  // 볼터치
+  g.fillStyle = 'rgba(255,120,150,.45)';
+  for (const dx of [-r * 2.2, r * 2.2]) { const c = pt(dx, r * 1.5); g.beginPath(); g.arc(c[0], c[1], r * 0.55, 0, 7); g.fill(); }
+  // 입: 평소엔 웃는 입, 어질어질하면 물결
+  g.strokeStyle = '#0d1030'; g.lineWidth = Math.max(1.5, r * 0.35); g.lineCap = 'round'; g.beginPath();
+  const mx = facing * r * 0.3, my = r * 2;
+  if (down) { for (let i = 0; i <= 8; i++) { const p = pt(mx - r * 1.2 + i * r * 0.3, my + (i % 2 ? r * 0.25 : -r * 0.25)); i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); } }
+  else { const L = pt(mx - r, my - r * 0.2), C = pt(mx, my + r * 0.9), R = pt(mx + r, my - r * 0.2); g.moveTo(L[0], L[1]); g.quadraticCurveTo(C[0], C[1], R[0], R[1]); }
+  g.stroke();
+}
+function limb(g, pts, color, alpha) {
+  const a = g.globalAlpha; g.globalAlpha = a * alpha;
+  g.strokeStyle = '#0d1030'; g.lineWidth = 10; pline(g, pts); g.stroke();
+  g.strokeStyle = color; g.lineWidth = 6.5; pline(g, pts); g.stroke();
+  g.globalAlpha = a;
+}
+function arm(g, pts, color) {
+  g.strokeStyle = '#0d1030'; g.lineWidth = 10; pline(g, pts); g.stroke();
+  g.strokeStyle = shade(color, 0.25); g.lineWidth = 6.5; pline(g, pts); g.stroke();
+  const e = pts[pts.length - 1], p0 = pts[Math.max(0, pts.length - 3)];
+  const ang = Math.atan2(e[1] - p0[1], e[0] - p0[0]);
+  if (THEME === 'pong') {   // 뿅망치: 팔 끝에 가로로 붙은 빨간 망치 머리
+    g.save(); g.translate(e[0], e[1]); g.rotate(ang);
+    g.fillStyle = '#0d1030'; roundRect(g, -2, -19, 22, 38, 7); g.fill();
+    g.fillStyle = '#ff4d6d'; roundRect(g, 0.5, -16.5, 17, 33, 5); g.fill();
+    g.fillStyle = '#ffd54f'; g.fillRect(0.5, -4, 17, 8);
+    g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(3, -14, 4, 28);
+    g.restore(); return;
+  }
+  if (THEME === 'balloon') {   // 반짝 별 요술봉
+    g.save(); g.translate(e[0], e[1]); g.rotate(ang + Math.PI / 2);
+    starPath(g, 12, 5.5); g.fillStyle = '#0d1030'; g.lineWidth = 5; g.lineJoin = 'round'; g.strokeStyle = '#0d1030'; g.stroke(); g.fillStyle = '#ffe066'; g.fill();
+    g.restore(); return;
+  }
+  g.fillStyle = '#0d1030'; g.beginPath(); g.arc(e[0], e[1], 9, 0, 7); g.fill();
+  g.fillStyle = '#ffca28'; g.beginPath(); g.arc(e[0], e[1], 6.5, 0, 7); g.fill();
+}
+function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+function pline(g, pts) { g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); }
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16); let r = n >> 16, gg = (n >> 8) & 255, b = n & 255;
+  const f = v => Math.max(0, Math.min(255, Math.round(k < 0 ? v * (1 + k) : v + (255 - v) * k)));
+  return 'rgb(' + f(r) + ',' + f(gg) + ',' + f(b) + ')';
+}
+function drawPreview(c, d, color) {
+  const g = c.getContext('2d');
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const k of ['body', 'arm', 'leg']) for (const p of d[k]) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+  const s = Math.min(c.width / (x1 - x0 + 40), c.height / (y1 - y0 + 40));
+  g.setTransform(s, 0, 0, s, c.width / 2 - (x0 + x1) / 2 * s, c.height / 2 - (y0 + y1) / 2 * s);
+  g.clearRect(x0 - 100, y0 - 100, x1 - x0 + 200, y1 - y0 + 200);
+  drawRobotLocal(g, d, color, 1, false);
+}
+pad.addEventListener('pointerdown', e => { raw = [toWorld(e)]; try { pad.setPointerCapture(e.pointerId); } catch (er) {} e.preventDefault(); drawPad(); });
+pad.addEventListener('pointermove', e => { if (!raw) return; raw.push(toWorld(e)); e.preventDefault(); drawPad(); });
+const endStroke = () => {
+  if (!raw) return;
+  const pts = RB.cleanStroke(raw, RB.INK[part]); raw = null;
+  const need = part === 'body' ? 80 : 20;
+  if (pts.length < 2 || RB.inkOf(pts) < need) { setHint('조금 더 크게 그려 줘'); drawPad(); return; }
+  strokes[part] = pts;
+  if (!tempDraw() && (stage > 0 || +(lsGet('stage') || 0) > 0 || +(lsGet('ura.stage') || 0) > 0)) { resetAllRuns(); updateSideUi(); }
+  if (part === 'body' && (strokes.arm || strokes.leg)) setHint('몸을 바꿔서 팔·다리도 다시 붙였어');
+  else setHint('');
+  saveRobot();
+  SFX.play(myRobot ? 'done' : 'pop');
+  // つぎのパーツへ
+  const next = !strokes.body ? 'body' : !strokes.arm ? 'arm' : !strokes.leg ? 'leg' : part;
+  setPart(next === part && part !== 'leg' && !strokes[next] ? part : next);
+};
+pad.addEventListener('pointerup', endStroke); pad.addEventListener('pointercancel', endStroke);
+function saveRobot() {
+  myRobot = null;
+  if (strokes.body && strokes.arm && strokes.leg) {
+    const d = RB.design(strokes.body, strokes.arm, strokes.leg);
+    if (RB.validDesign(d)) { myRobot = withCrown(d); if (!tempDraw()) lsSet('robot', RB.encodeDesign(d)); }
+  }
+  updateButtons();
+}
+$('mname').addEventListener('input', () => {
+  const n = cleanName($('mname').value);
+  if (tourDraw) tourDraw.name = n;
+  else if (!vs) { myName = n; lsSet('name', n); }
+});
+$('mname').addEventListener('keydown', e => { if (e.key === 'Enter') $('mname').blur(); });
+function setHint(t) { $('hint').textContent = t; }
+function updateButtons() { $('fight').disabled = !myRobot; $('fightfriend').disabled = !myRobot; $('send').disabled = !myRobot; updateStats(); }
+// つよさのバー（モンスターができているときだけ）
+function updateStats() {
+  const st = myRobot ? RB.robotStats(myRobot) : null;
+  const set = (k, v, max, txt) => { $('b-' + k).style.width = (st ? Math.min(100, v / max * 100) : 0) + '%'; $('v-' + k).textContent = st ? txt : ''; };
+  set('hp', st && st.hp, 250, st && String(st.hp));
+  set('punch', st && st.punch, 22, st && st.punch.toFixed(0));
+  set('reach', st && st.reach, 150, st && String(Math.round(st.reach)));
+  set('speed', st && st.speed, 6, st && st.speed.toFixed(1));
+}
+
+// ---------- バトル ----------
+let S = null, opp = null, acc = 0, last = 0, stop = 0, shake = 0, parts = [], pops = [], hurt = { A: 0, B: 0 }, endAt = 0, isFriend = false, cam = null;
+// 연출(격투 게임풍): 히트 스파크·충격파·흙먼지·화면 번쩍임·콤보·라운드 인트로·K.O. — 물리와 무관, 보기만
+let fxs = [], flash = 0, combo = { who: null, n: 0, t: -9 }, comboShow = null, introUntil = 0, fightSaid = true, koT = 0;
+const INTRO = 1500, INTRO_FIGHT = 700;
+function startBattle(friend) {
+  if (!myRobot) return;
+  isFriend = !!friend;
+  pA = { name: dispName(), color: ME.color };
+  opp = friend ? { name: FRIEND.name, color: FRIEND.color, d: friendRobot } : { name: CPUS()[stage].name, color: CPUS()[stage].color, d: CPUS()[stage] };
+  S = RB.create(myRobot, opp.d); S.stage = stage; S.side = friend ? 'friend' : side; S.crownA = !!myRobot.crown; S.crownB = !!opp.d.crown;
+  TR('battle', { side: S.side, stage: stage, opp: opp.name, me: RB.encodeDesign(myRobot), st: stat4(myRobot), crown: !!myRobot.crown, fast: fast });
+  acc = 0; last = performance.now(); stop = 0; shake = 0; parts = []; pops = []; hurt = { A: 0, B: 0 }; endAt = 0; cam = null;
+  mode = 'battle'; show('none'); beginBattleFx();
+}
+function beginBattleFx() {
+  balPrev = { A: balloonsLeft(S.A), B: balloonsLeft(S.B) };
+  fxs = []; flash = 0; combo = { who: null, n: 0, t: -9 }; comboShow = null; koT = 0;
+  SFX.music(S.side === 'ura' ? 'ura' : 'battle');
+  if (canFast() && fast) { introUntil = 0; fightSaid = true; SFX.play('fight'); } else { introUntil = performance.now() + INTRO; fightSaid = false; SFX.play('round'); }
+}
+function stepBattle() {
+  RB.step(S);
+  for (const e of S.fx) {
+    if (e.t === 'hit') {
+      hurt[e.who === 'A' ? 'B' : 'A'] = 10;
+      const att = S[e.who], def = S[e.who === 'A' ? 'B' : 'A'], dir = def.x >= att.x ? 1 : -1;
+      const pw = e.dmg >= 24 ? 2 : e.dmg >= 15 ? 1 : 0;   // 0 보통 · 1 강타 · 2 필살급
+      const soft = gentle();
+      fxs.push({ k: soft ? 'star' : 'spark', x: e.x, y: e.y, dir, s: 0.7 + Math.min(1.6, e.dmg / 12), rot: rnd() * 6.28, life: 12 + pw * 4, max: 12 + pw * 4, c: soft ? PASTEL[Math.floor(rnd() * 5)] : e.who === 'A' ? '#ffe082' : '#ff8a80' });
+      fxs.push({ k: 'ring', x: e.x, y: e.y, s: 1 + pw * 0.6, life: 16 + pw * 4, max: 16 + pw * 4, c: soft ? '#ffffff' : pw ? '#ffffff' : '#ffd54f' });
+      if (soft) for (let i = 0; i < 3 + pw * 2; i++) fxs.push({ k: 'twinkle', x: e.x + (rnd() - .5) * 50, y: e.y + (rnd() - .5) * 30, vy: -1 - rnd() * 1.5, heart: rnd() < 0.4, c: PASTEL[Math.floor(rnd() * 5)], s: 0.7 + rnd() * 0.6, life: 40, max: 40 });
+      if (pw) { if (!soft) fxs.push({ k: 'lines', x: e.x, y: e.y, dir, life: 12, max: 12 }); flash = Math.max(flash, soft ? 0.12 : pw === 2 ? 0.55 : 0.3); pops.push({ x: e.x, y: e.y - 55, t: pw === 2 ? TX('big2') : TX('big1'), c: pw === 2 ? (soft ? '#ff8fb1' : '#ff5252') : '#ffffff', life: 50, size: pw === 2 ? 30 : 24 }); }
+      if (combo.who === e.who && S.t - combo.t < 1.4) combo.n++; else combo = { who: e.who, n: 1 };
+      combo.t = S.t; if (combo.n >= 2) comboShow = { who: e.who, n: combo.n, life: 80 };
+      SFX.play('hit', e.dmg);
+      stop = Math.min(soft ? 6 : 10, 3 + Math.round(e.dmg / 2)); shake = Math.max(shake, (3 + e.dmg * 0.6) * (soft ? 0.4 : 1));
+      if (soft) { for (let i = 0; i < 8 + Math.round(e.dmg * 0.8); i++) burst(e.x, e.y, PASTEL[i % 5], 1, 260); }
+      else burst(e.x, e.y, '#ffd54f', 10 + Math.round(e.dmg * 1.5), 320);
+      pops.push({ x: e.x, y: e.y - 10, t: soft ? TX('hitPop') : e.dmg.toFixed(0), c: soft ? '#ffffff' : e.who === 'A' ? '#ffd54f' : '#ff8a80', life: 55, size: 20 + Math.min(20, e.dmg * 1.2) });
+    } else if (e.t === 'down') {
+      pops.push({ x: e.x, y: e.y - 90, t: TX('down') + (gentle() ? ' 💫' : ''), c: '#ffffff', life: 60, size: 26 });
+      for (let i = 0; i < 9; i++) fxs.push({ k: 'dust', x: e.x + (rnd() - .5) * 90, y: -6 - rnd() * 10, vx: (rnd() - .5) * 3, r: 8 + rnd() * 10, life: 30 + rnd() * 15, max: 45 });
+      SFX.play('down');
+    } else if (e.t === 'end') {
+      endAt = performance.now(); SFX.music(null);
+      if (S.reason === 'ko') {
+        koT = endAt; SFX.play('ko');
+        if (gentle()) { stop = 30; shake = 4; flash = 0.35; for (let i = 0; i < 80; i++) burst(S[S.winner || 'A'].x, -150, PASTEL[i % 5], 1, 520); }
+        else { stop = 40; shake = 18; flash = 1; if (cam) cam.k *= 1.15; }
+      }
+      else SFX.play('timeup');
+    }
+  }
+  S.fx.length = 0;
+  if (THEME === 'balloon' && balPrev) for (const k of ['A', 'B']) {
+    const n = balloonsLeft(S[k]);
+    while (balPrev[k] > n) {
+      balPrev[k]--;
+      const p = (S[k]._bal && S[k]._bal[balPrev[k]]) || [S[k].x, -200];
+      for (let i = 0; i < 14; i++) burst(p[0], p[1], BALLOON_COLS[balPrev[k] % 5], 1, 300);
+      pops.push({ x: p[0], y: p[1] - 20, t: '펑!', c: BALLOON_COLS[balPrev[k] % 5], life: 45, size: 26 });
+      SFX.play('balloon');
+    }
+  }
+}
+let balPrev = null;
+let seed = 1;
+function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+function burst(x, y, c, n, sp) { for (let i = 0; i < n; i++) { const a = rnd() * 6.28, v = sp * (0.3 + rnd()); parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 100, c, life: 20 + rnd() * 25 }); } }
+
+function frame(now) {
+  if (mode === 'battle') {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (introUntil && now < introUntil) {
+      if (!fightSaid && now > introUntil - INTRO_FIGHT) { fightSaid = true; SFX.play('fight'); }
+    } else if (!S.over) {
+      const sp = canFast() && fast ? FAST : 1;
+      if (stop > 0) stop = sp > 1 ? 0 : stop - 1;   // はやおくり中は ヒットの止め を はぶく
+      else { acc += dt * sp; let n = 0; while (acc >= RB.DT && n < 48 * sp) { stepBattle(); acc -= RB.DT; n++; if (S.over || (stop > 0 && sp === 1)) break; } if (n >= 48 * sp) acc = 0; }
+    } else if (now - endAt > (canFast() && fast ? 600 : 1800)) showResult();
+    renderBattle(dt);
+  } else if (mode === 'draw') drawPad();
+  else if (mode === 'pause') renderBattle(0);
+  else if (mode === 'ending') renderEnding(now);
+  else if (mode === 'board' && typeof boardFrame === 'function') boardFrame(now);
+  requestAnimationFrame(frame);
+}
+
+// カメラ: 2 体が入るように寄る
+function camera() {
+  const x0 = Math.min(S.A.x, S.B.x) - 115, x1 = Math.max(S.A.x, S.B.x) + 115;
+  const cx = (x0 + x1) / 2, k = Math.min(W / (x1 - x0), (H - 200 * hudScale()) / 300, 1.7 * hudScale());
+  if (!cam) cam = { x: cx, k };
+  cam.x += (cx - cam.x) * 0.1; cam.k += (k - cam.k) * 0.06;
+  return cam;
+}
+function renderBattle(dt) {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const ura = S.side === 'ura';
+  const sky = ctx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, ura ? '#1a0610' : '#15173a'); sky.addColorStop(1, ura ? '#4a0f1f' : '#3a2a63');   // うらは 赤黒い
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  const c = camera(), gy = H * 0.72;
+  let sx = 0, sy = 0; if (shake > 0) { sx = (rnd() - .5) * shake; sy = (rnd() - .5) * shake; shake *= 0.86; if (shake < 0.3) shake = 0; }
+  ctx.save(); ctx.translate(W / 2 + sx, gy + sy); ctx.scale(c.k, c.k); ctx.translate(-c.x, 0);
+  // 観客席のライト
+  ctx.fillStyle = 'rgba(124,131,255,.08)';
+  for (let x = -RB.HW - 200; x < RB.HW + 200; x += 90) { ctx.beginPath(); ctx.moveTo(x, -420); ctx.lineTo(x + 40, 0); ctx.lineTo(x - 40, 0); ctx.fill(); }
+  // かべ
+  ctx.fillStyle = '#2b2f6b';
+  ctx.fillRect(-RB.HW - 60, -500, 60, 520); ctx.fillRect(RB.HW, -500, 60, 520);
+  // ゆか
+  ctx.fillStyle = '#4b3f8f'; ctx.fillRect(-RB.HW - 300, 0, 2 * RB.HW + 600, 200);
+  ctx.fillStyle = '#7c83ff'; ctx.fillRect(-RB.HW, 0, 2 * RB.HW, 5);
+  ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.lineWidth = 2;
+  for (let x = -RB.HW; x <= RB.HW; x += 60) { ctx.beginPath(); ctx.moveTo(x, 5); ctx.lineTo(x * 1.3, 120); ctx.stroke(); }
+  for (const k of ['B', 'A']) drawRobotWorld(S[k], k === 'A' ? pA.color : opp.color, hurt[k] > 0, k === 'A' ? S.crownA : S.crownB);
+  for (const k of ['A', 'B']) if (hurt[k] > 0) hurt[k]--;
+  drawFx();
+  // かけら・数字
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 900 * dt; p.vx *= 0.96;
+    if (--p.life <= 0 || p.y > 0) { parts.splice(i, 1); continue; }
+    ctx.fillStyle = p.c; ctx.globalAlpha = Math.min(1, p.life / 15); ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+  }
+  ctx.globalAlpha = 1;
+  for (let i = pops.length - 1; i >= 0; i--) {
+    const p = pops[i]; p.y -= 0.8; if (--p.life <= 0) { pops.splice(i, 1); continue; }
+    ctx.globalAlpha = Math.min(1, p.life / 15);
+    ctx.font = '900 ' + p.size + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 6; ctx.strokeStyle = '#15173a'; ctx.strokeText(p.t, p.x, p.y); ctx.fillStyle = p.c; ctx.fillText(p.t, p.x, p.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  drawScreenFx();
+  drawHud();
+}
+// モンスターを ワールドに（シミュレーションの点を そのまま使う）
+function drawRobotWorld(b, color, flash, crown) {
+  const co = Math.cos(b.th), si = Math.sin(b.th);
+  const tf = (lx, ly) => [b.x + lx * co - ly * si, b.y + lx * si + ly * co];
+  // 影
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(b.x, 3, 60, 8, 0, 0, 7); ctx.fill();
+  const joint = j => {
+    const h = tf(j.ox, j.oy), cj = Math.cos(j.a), sj = Math.sin(j.a);
+    return j.pts.map(p => [h[0] + p.x * cj - p.y * sj, h[1] + p.x * sj + p.y * cj]);
+  };
+  const legPts = joint(b.leg), n = Math.ceil(legPts.length / 2);
+  const legA = legPts.slice(0, n), legB = [legPts[0]].concat(legPts.slice(n));
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  limb(ctx, legB, '#37474f', 0.6);
+  const poly = b.bodyPts.map(p => tf(p.x, p.y));
+  const bodyCol = flash ? '#ffffff' : color;
+  if (S.side === 'ura' && b === S.B) { ctx.shadowColor = '#ff1744'; ctx.shadowBlur = 26; }   // うらの敵は 赤く光る
+  pline(ctx, poly); ctx.closePath(); ctx.fillStyle = bodyCol; ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.save(); pline(ctx, poly); ctx.closePath(); ctx.clip();
+  ctx.fillStyle = 'rgba(255,255,255,.16)'; ctx.fillRect(b.x - 300, b.y - 300, 600, 300 + (-120));
+  ctx.restore();
+  ctx.strokeStyle = '#0d1030'; ctx.lineWidth = 4; pline(ctx, poly); ctx.closePath(); ctx.stroke();
+  // 目（体の上のほう・前寄り）
+  let top = null; for (const p of b.bodyPts) if (!top || p.y < top.y) top = p;
+  let x0 = Infinity, x1 = -Infinity; for (const p of b.bodyPts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); }
+  const w = x1 - x0, r = Math.max(3.5, Math.min(8, w * 0.1));
+  const ex = (x0 + x1) / 2 + b.facing * w * 0.12, ey = top.y + Math.min(22, w * 0.3 + 8);
+  face(ctx, tf, ex, ey, r, b.facing, b.downT > 0 || b.hp <= 0);
+  if (THEME === 'balloon') drawBalloons(b, tf(top.x, top.y));
+  if (crown) { const cs = crownSpot(b.bodyPts), c = tf(cs.x, cs.y); ctx.save(); ctx.translate(c[0], c[1]); ctx.rotate(b.th); drawCrown(ctx, 0, -1, cs.s); ctx.restore(); }
+  limb(ctx, legA, '#455a64', 1);
+  arm(ctx, joint(b.arm), color);
+}
+// 전자칠판처럼 큰 화면의 대결은 글자·체력바를 키움
+function hudScale() { return S && S.side === 'board' ? Math.max(1, Math.min(2.2, Math.min(W, H * 1.6) / 900)) : 1; }
+// 풍선 테마: 머리 위에 남은 풍선 (줄로 묶임). 위치를 b._bal 에 기억해 터질 때 씀
+function drawBalloons(b, anchor) {
+  const n = balloonsLeft(b), all = BALLOONS; b._bal = [];
+  for (let i = 0; i < all; i++) {
+    const x = anchor[0] + (i - (all - 1) / 2) * 20 + Math.sin(performance.now() / 600 + i) * 2, y = anchor[1] - 58 - (i % 2) * 16;
+    b._bal.push([x, y]);
+    if (i >= n) continue;
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(anchor[0], anchor[1]); ctx.quadraticCurveTo((anchor[0] + x) / 2 + 6, (anchor[1] + y) / 2, x, y + 13); ctx.stroke();
+    ctx.fillStyle = BALLOON_COLS[i % 5]; ctx.strokeStyle = '#0d1030'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.ellipse(x, y, 11, 13.5, 0, 0, 6.283); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - 3, y + 15); ctx.lineTo(x + 3, y + 15); ctx.lineTo(x, y + 12); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.beginPath(); ctx.ellipse(x - 4, y - 5, 3, 4.5, -0.4, 0, 6.283); ctx.fill();
+  }
+}
+function drawHud() {
+  const u = hudScale(); if (u === 1) { drawHud0(); return; }
+  const w0 = W, h0 = H; ctx.save(); ctx.scale(u, u); W = w0 / u; H = h0 / u;
+  try { drawHud0(); } finally { W = w0; H = h0; ctx.restore(); }
+}
+function drawHud0() {
+  const top = 12, bw = (W - 110) / 2;
+  const bar = (x, hp, max, name, col, right) => {
+    ctx.font = '800 14px sans-serif'; ctx.textBaseline = 'alphabetic'; ctx.textAlign = right ? 'right' : 'left'; ctx.fillStyle = '#fff';
+    ctx.fillText(name, right ? x + bw : x, top + 16);
+    ctx.fillStyle = 'rgba(255,255,255,.15)'; round(x, top + 24, bw, 14, 7); ctx.fill();
+    const w = bw * hp / max;
+    ctx.fillStyle = hp > max / 2 ? col : hp > max / 4 ? '#ffb300' : '#e53935'; round(right ? x + bw - w : x, top + 24, Math.max(0, w), 14, 7); ctx.fill();
+    ctx.font = '900 12px sans-serif'; ctx.fillStyle = '#fff'; ctx.textAlign = right ? 'right' : 'left';
+    ctx.fillText(Math.ceil(hp), right ? x + bw - 4 : x + 4, top + 35);
+  };
+  bar(12, S.A.hp, S.A.maxHp, pA.name, pA.color, false);
+  bar(W - 12 - bw, S.B.hp, S.B.maxHp, opp.name, S.side === 'ura' ? '#ff5252' : opp.color, true);   // うらの敵は色が暗いので バーは赤
+  ctx.textAlign = 'center'; ctx.font = '900 26px sans-serif'; ctx.fillStyle = S.t > RB.TIME - 5 ? '#ff8a80' : '#fff';
+  ctx.fillText(Math.max(0, Math.ceil(RB.TIME - S.t)), W / 2, top + 34);
+  if (S.label) { ctx.font = '700 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText(S.label, W / 2, top + 54); }
+  else if (!isFriend) { ctx.font = '700 12px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillText((S.side === 'ura' ? '히든 ' : '') + '연승전 ' + (S.stage + 1) + ' / ' + CPUS().length, W / 2, top + 54); }
+  const now = performance.now(), ease = k => 1 - Math.pow(1 - Math.max(0, Math.min(1, k)), 3);
+  if (introUntil && now < introUntil) {
+    const t = INTRO - (introUntil - now);
+    if (t < INTRO - INTRO_FIGHT) big(S.label ? S.label : isFriend || S.side === 'vs' ? '준비!' : (S.side === 'ura' ? '히든 ' : '') + '라운드 ' + (S.stage + 1), '#ffffff', Math.min(1, t / 150), 1.5 - 0.5 * ease(t / 250));
+    else { const k = (t - (INTRO - INTRO_FIGHT)) / 180; big(TX('start'), '#ffd54f', 1, 2.2 - 1.2 * ease(k)); }
+  } else if (S.t < 0.5) big(TX('start'), '#ffd54f', 1 - S.t / 0.5);
+  if (S.over) {
+    const wc = S.side === 'vs' || S.side === 'tour' || S.side === 'board' || S.winner === 'A' ? '#ffd54f' : '#ff5252';
+    if (S.reason === 'ko') {
+      const k = koT ? (now - koT) / 260 : 9;
+      big(TX('ko'), gentle() ? '#ff8fb1' : wc, 1, 2.6 - 1.6 * ease(k));
+      const w = S.winner ? S[S.winner] : null;
+      if (w && w.hp >= w.maxHp && k > 1.5) big('퍼펙트!', '#80d8ff', Math.min(1, (k - 1.5) * 2), 0.55, H * 0.44);
+    } else big(TX('timeup'), wc, 1);
+  }
+  if (comboShow && !S.over) {
+    const c = comboShow, a = Math.min(1, c.life / 20), pop = 1 + Math.max(0, (c.life - 70) / 10) * 0.4, left = c.who === 'A';
+    ctx.save(); ctx.globalAlpha = a; ctx.translate(left ? 16 : W - 16, 178); ctx.scale(pop, pop);
+    ctx.textAlign = left ? 'left' : 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.font = 'italic 900 34px sans-serif'; ctx.lineWidth = 7; ctx.lineJoin = 'round'; ctx.strokeStyle = '#15173a';
+    const ct = c.n + TX('comboUnit'); ctx.strokeText(ct, 0, 0); ctx.fillStyle = c.n >= 5 ? (gentle() ? '#ff8fb1' : '#ff5252') : '#ffd54f'; ctx.fillText(ct, 0, 0);
+    ctx.font = '900 15px sans-serif'; ctx.lineWidth = 5; ctx.strokeText(TX('combo'), left ? 2 : -2, 20); ctx.fillStyle = '#fff'; ctx.fillText(TX('combo'), left ? 2 : -2, 20);
+    ctx.restore();
+    if (--c.life <= 0) comboShow = null;
+  }
+}
+function big(t, c, a, sc, y) {
+  sc = sc || 1; y = y || H * 0.32;
+  ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.translate(W / 2, y); ctx.scale(sc, sc);
+  const fs = Math.min(72, W * 0.16); ctx.font = 'italic 900 ' + fs + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 12; ctx.lineJoin = 'round'; ctx.strokeStyle = '#15173a'; ctx.strokeText(t, 0, 0);
+  const g = ctx.createLinearGradient(0, -fs / 2, 0, fs / 2); g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, c); g.addColorStop(1, c);
+  ctx.fillStyle = g; ctx.fillText(t, 0, 0); ctx.restore();
+}
+function starPath(g, R, r) { g.beginPath(); for (let j = 0; j < 10; j++) { const a = -Math.PI / 2 + j * Math.PI / 5, rr = j % 2 ? r : R; g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } g.closePath(); }
+// 월드 좌표 이펙트
+function drawFx() {
+  for (let i = fxs.length - 1; i >= 0; i--) {
+    const f = fxs[i], k = 1 - f.life / f.max;   // 0 → 1
+    ctx.save(); ctx.globalAlpha = Math.max(0, 1 - k);
+    if (f.k === 'spark') {   // 별 모양 히트 스파크
+      ctx.translate(f.x, f.y); ctx.rotate(f.rot); const R = (26 + 30 * k) * f.s, r = R * 0.35;
+      ctx.beginPath(); for (let j = 0; j < 16; j++) { const a = j / 16 * 6.283, rr = j % 2 ? r : R * (j % 4 ? 0.7 : 1); ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } ctx.closePath();
+      ctx.fillStyle = f.c; ctx.fill(); ctx.scale(0.5, 0.5); ctx.fillStyle = '#ffffff'; ctx.fill();
+    } else if (f.k === 'star') {   // 둥근 별 (순한 모드)
+      ctx.translate(f.x, f.y); ctx.rotate(f.rot + k * 1.5); const R = (20 + 26 * k) * f.s;
+      starPath(ctx, R, R * 0.5); ctx.fillStyle = f.c; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#ffffff'; ctx.lineJoin = 'round'; ctx.stroke();
+    } else if (f.k === 'twinkle') {   // 떠오르는 작은 별·하트
+      f.y += f.vy; ctx.translate(f.x, f.y); ctx.scale(f.s, f.s); ctx.fillStyle = f.c;
+      if (f.heart) { ctx.beginPath(); ctx.moveTo(0, 6); ctx.bezierCurveTo(-12, -2, -6, -12, 0, -5); ctx.bezierCurveTo(6, -12, 12, -2, 0, 6); ctx.fill(); }
+      else { starPath(ctx, 8, 3.5); ctx.fill(); }
+    } else if (f.k === 'ring') {   // 충격파
+      ctx.strokeStyle = f.c; ctx.lineWidth = 6 * (1 - k) + 1; ctx.beginPath(); ctx.arc(f.x, f.y, (14 + 70 * k) * f.s, 0, 6.283); ctx.stroke();
+    } else if (f.k === 'lines') {   // 맞은 쪽으로 뻗는 집중선
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.beginPath();
+      for (let j = 0; j < 9; j++) { const a = (j - 4) * 0.16, len = 60 + 50 * k; const ca = Math.cos(a) * f.dir, sa = Math.sin(a); ctx.moveTo(f.x + ca * 20, f.y + sa * 20); ctx.lineTo(f.x + ca * (20 + len), f.y + sa * (20 + len)); }
+      ctx.stroke();
+    } else if (f.k === 'dust') {   // 흙먼지
+      f.x += f.vx; f.y -= 0.5; ctx.fillStyle = 'rgba(220,215,240,.8)'; ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.6 + k), 0, 6.283); ctx.fill();
+    }
+    ctx.restore();
+    if (--f.life <= 0) fxs.splice(i, 1);
+  }
+}
+// 화면 전체 이펙트: K.O. 집중선 · 번쩍임
+function drawScreenFx() {
+  const now = performance.now();
+  if (koT && now - koT < 1100 && !gentle()) {
+    const k = (now - koT) / 1100; ctx.save(); ctx.globalAlpha = 0.55 * (1 - k); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+    const cx = W / 2, cy = H * 0.45, R = Math.hypot(W, H);
+    ctx.beginPath(); for (let j = 0; j < 48; j++) { const a = j / 48 * 6.283 + (j % 3) * 0.02, r0 = R * (0.28 + ((j * 37) % 11) / 40); ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R); }
+    ctx.stroke(); ctx.restore();
+  }
+  if (flash > 0.01) { ctx.fillStyle = 'rgba(255,255,255,' + Math.min(0.85, flash) + ')'; ctx.fillRect(0, 0, W, H); flash *= 0.8; } else flash = 0;
+}
+function round(x, y, w, h, r) { r = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+// タイトルの後ろ: CPU モンスターを並べる
+function drawTitleBg() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const sky = ctx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#15173a'); sky.addColorStop(1, '#3a2a63');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#4b3f8f'; ctx.fillRect(0, H - 60, W, 60);
+}
+
+// ---------- 結果 ----------
+function showResult() {
+  mode = 'result'; show('result');
+  TR('result', { side: S.side, stage: S.stage, opp: opp && opp.name, win: S.winner === 'A' ? 'win' : S.winner === 'B' ? 'lose' : 'draw', reason: S.reason, t: Math.round(S.t * 10) / 10, hp: [Math.ceil(S.A.hp), Math.ceil(S.B.hp)], hits: [S.A.hits, S.B.hits], dmg: [Math.round(S.A.dealt), Math.round(S.B.dealt)], fast: fast });
+  $('share').hidden = false; $('vstitle').hidden = true; $('redraw').hidden = false; $('redraw').textContent = '몬스터 고치기';
+  $('next').textContent = '다음 상대로'; $('next').classList.remove('ura'); $('again').className = 'main'; goUra = false;
+  $('vstitle').textContent = '처음 화면으로';
+  if (S.side === 'board') { if (S.replay) boardAfterReplay(); else boardResult(); return; }
+  if (S.side === 'tour') { tourResult(); return; }
+  if (S.side === 'vs') {
+    $('rtitle').textContent = S.winner === 'A' ? '1P 승리!' : S.winner === 'B' ? '2P 승리!' : '무승부';
+    $('rtitle').className = 'rtitle ' + (S.winner ? 'win' : '');
+    $('rsub').textContent = (S.reason === 'ko' ? TX('ko') + '(' + S.t.toFixed(1) + '초)' : '시간 끝') + '\n남은 ' + TX('hp') + '　1P ' + Math.ceil(S.A.hp) + '　2P ' + Math.ceil(S.B.hp);
+    $('rprog').innerHTML = '';
+    $('next').hidden = false; $('next').innerHTML = '한 번 더<small>고쳐서 겨루기</small>';
+    $('again').hidden = false; $('again').textContent = '같은 싸움 다시 보기'; $('again').className = 'sub';
+    $('redraw').hidden = true; $('share').hidden = true; $('vstitle').hidden = false;
+    SFX.play(S.winner ? 'win' : 'draw');
+    return;
+  }
+  const win = S.winner === 'A', draw = S.winner == null;
+  $('rtitle').textContent = win ? '이겼다!' : draw ? '무승부' : TX('lose');
+  $('rtitle').className = 'rtitle ' + (win ? 'win' : draw ? '' : 'lose');
+  $('rsub').textContent = (S.reason === 'ko' ? TX('ko') + '(' + S.t.toFixed(1) + '초)' : '시간 끝(남은 ' + TX('hp') + ' ' + Math.ceil(S.A.hp) + ' 대 ' + Math.ceil(S.B.hp) + ')') + (gentle() ? '\n' + TX('hitWord') + ' ' + S.A.hits + '번 성공!' : '\n펀치 ' + S.A.hits + '방 · 대미지 ' + Math.round(S.A.dealt));
+  let showNext = false, wins = stage;
+  if (!isFriend) {
+    if (win) {
+      wins = stage + 1;
+      if (!beaten[stage]) { beaten[stage] = true; lsSet(sk('beaten'), JSON.stringify(beaten)); }
+      if (stage < CPUS().length - 1) { stage++; lsSet(sk('stage'), String(stage)); showNext = true; }
+      else {
+        cleared = true; lsSet(sk('cleared'), '1'); resetRun();
+        if (side === 'ura') { onUraClear(); }
+        if (side === 'ura') $('rsub').textContent += '\n히든 5연승 달성!! 진짜 대단해!';
+        else { $('rsub').textContent += '\n5연승 달성!'; const firstUra = !uraOpen; uraOpen = true; $('rsub').textContent += firstUra ? '\n…히든 연승전이 나타났다!' : '\n히든 연승전이 기다리고 있어…!'; goUra = true; }
+      }
+    } else {
+      resetRun();
+      $('rsub').textContent += '\n' + wins + '연승으로 끝';
+    }
+    if (wins > best) { best = wins; lsSet(sk('best'), String(best)); $('rsub').textContent += '\n최고 기록!'; }
+  }
+  SFX.play(win ? (!isFriend && wins === CPUS().length ? 'clear' : 'win') : draw ? 'draw' : 'lose');
+  $('rprog').innerHTML = isFriend ? '친구 몬스터와 승부' : CPUS().map((c, i) => '<span class="dot ' + (i < wins ? 'ok' : i === wins && !win ? 'lost' : i === wins ? 'now' : '') + '">' + c.name + '</span>').join('');
+  $('next').hidden = !showNext && !goUra;
+  $('again').hidden = showNext;
+  if (goUra) { $('next').innerHTML = '히든 연승전으로!<small>엄청나게 센 5마리</small>'; $('next').classList.add('ura'); $('again').className = 'sub'; $('again').textContent = '기본 한 번 더'; }
+  $('again').textContent = isFriend ? '한 번 더' : goUra ? '기본 한 번 더' : '첫 상대부터 한 번 더';
+  $('redraw').textContent = !isFriend && stage > 0 ? '몬스터 고치기(첫 상대부터)' : '몬스터 고치기';
+  if (endingPending) startEnding();
+}
+function shareRobot() {
+  if (!myRobot) return;
+  TR('share', { me: RB.encodeDesign(myRobot) });
+  const url = SITE_URL + '#r=' + RB.encodeDesign(myRobot) + (myName ? '&n=' + encodeURIComponent(myName) : '');
+  const text = (myName ? '「' + myName + '」 — ' : '') + '내 몬스터랑 겨뤄 보자! (그려라! 몬스터 놀이터)\n' + url;
+  showShareBox('몬스터 보내기', '친구 폰 카메라로 QR을 찍으면 바로 대결할 수 있어!', text, url);
+}
+// QR 코드 + 글 (보내기·게임 주소 공용)
+let shareText = '';
+function showShareBox(title, note, text, url) {
+  shareText = text;
+  $('sharetitle').textContent = title; $('sharenote').textContent = note; $('sharetext').value = text;
+  drawQR($('qr'), url);
+  $('nativeshare').hidden = !navigator.share;
+  $('sharebox').hidden = false;
+}
+function drawQR(cv, url) {
+  const g = cv.getContext('2d');
+  try {
+    const q = qrcode(0, 'M'); q.addData(url); q.make();
+    const n = q.getModuleCount(), m = 2, px = Math.floor(cv.width / (n + m * 2)), off = Math.floor((cv.width - px * n) / 2);
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.fillStyle = '#000';
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (q.isDark(y, x)) g.fillRect(off + x * px, off + y * px, px, px);
+  } catch (e) { g.clearRect(0, 0, cv.width, cv.height); }
+}
+onTap($('nativeshare'), () => { if (navigator.share) navigator.share({ text: shareText }).catch(() => {}); });
+
+// ---------- ボタン ----------
+// 버튼 누르는 소리 · 소리 켜고 끄기
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('button') && e.target.id !== 'snd') SFX.play('tap'); }, true);
+function updateSndBtn() { $('snd').textContent = SFX.muted ? '🔇' : '🔊'; $('snd').classList.toggle('off', SFX.muted); }
+$('snd').addEventListener('click', e => { e.preventDefault(); SFX.toggle(); updateSndBtn(); if (!SFX.muted) SFX.play('tap'); });
+updateSndBtn();
+function onTap(el, fn) { el.addEventListener('click', e => { e.preventDefault(); fn(); }); }
+onTap($('start'), showDraw);
+// タイトルの文字を 5 回つづけてタップ → うら テストの印（ホーム画面のアプリは Safari と保存場所が別なので）
+{ let n = 0, t0 = 0; $('title').querySelector('.logo').addEventListener('click', () => { const now = Date.now(); n = now - t0 < 800 ? n + 1 : 1; t0 = now; if (n >= 5) { n = 0; lsSet('uratest', '1'); URA_TEST = true; uraOpen = true; showTitle(); } }); }
+onTap($('back'), () => { if (tourDraw) tourDrawCancel(); else if (vs) exitVs(); else showTitle(); });
+onTap($('fight'), () => { if (tourDraw) tourDrawDone(); else if (vs) vsNext(); else startBattle(false); });
+onTap($('fightfriend'), () => startBattle(true));
+onTap($('send'), shareRobot);
+onTap($('share'), shareRobot);
+onTap($('clearpart'), () => { SFX.play('erase'); strokes[part] = null; if (!tempDraw()) resetAllRuns(); saveRobot(); setPart(part); updateSideUi(); });
+let goUra = false;   // おもてを クリアした 直後: つぎへ ボタンが「うらへ」
+onTap($('next'), () => { if (S && S.side === 'board') boardRound(); else if (S && S.side === 'tour') showTour(); else if (vs) startVsMode(); else if (goUra) { goUra = false; side = 'ura'; lsSet('side', side); loadSide(); updateSideUi(); TR('gotoura', { from: 'result' }); startBattle(false); } else startBattle(false); });
+onTap($('again'), () => { if (S && S.side === 'board') boardReplay(); else if (S && S.side === 'tour') startTourMatch(tour.cur); else if (S && S.side === 'vs') startVsBattle(); else startBattle(isFriend); });
+onTap($('redraw'), () => { if (vs) startVsMode(); else showDraw(); });
+// ---------- うら 5 人抜き: 王冠・でんどういり・エンディング ----------
+let endT0 = 0, confetti = [];
+function onUraClear() {
+  TR('uraclear', { me: plainCode(myRobot) });
+  const code = plainCode(myRobot), list = crownedList();
+  if (!list.includes(code)) { list.push(code); lsSet('crowned', JSON.stringify(list)); }
+  myRobot.crown = true; lsSet('robot', RB.encodeDesign(myRobot)); S.crownA = true;
+  let hall = []; try { hall = JSON.parse(lsGet('hall') || '[]'); } catch (e) {}
+  if (!hall.some(h => h.c === code)) { const t = new Date(); hall.push({ c: code, d: (t.getMonth() + 1) + '/' + t.getDate() }); lsSet('hall', JSON.stringify(hall)); }
+  endingPending = true;
+}
+let endingPending = false;
+function renderHall() {
+  let hall = []; try { hall = JSON.parse(lsGet('hall') || '[]'); } catch (e) {}
+  $('hallbox').hidden = !hall.length;
+  const list = $('halllist'); list.innerHTML = '';
+  for (const h of hall.slice(-12)) {
+    const d = RB.decodeDesign(h.c); if (!d) continue; d.crown = true;
+    const el = document.createElement('div'); el.className = 'hall';
+    el.innerHTML = '<canvas width="128" height="128"></canvas><span>' + h.d + '</span>';
+    list.appendChild(el); drawPreview(el.querySelector('canvas'), d, ME.color);
+  }
+}
+function startEnding() { endingPending = false; SFX.music(null); SFX.play('fanfare'); mode = 'ending'; show('none'); $('quit').hidden = true; $('fast').hidden = true; endT0 = performance.now(); confetti = []; }
+let endingPreview = false;   // ?endingpreview の 見本（王冠・でんどういりの 記録は 付けない）
+function finishEnding() {
+  if (endingPreview) { endingPreview = false; myRobot.crown = isCrowned(myRobot); showTitle(); return; }
+  mode = 'result'; show('result');
+}
+window.endingAt = sec => { endT0 = performance.now() - sec * 1000; };   // 開発用: エンディングの その秒を 見る
+cv.addEventListener('pointerdown', () => { if (mode === 'ending' && performance.now() - endT0 > 1200) finishEnding(); });
+// 絵の いちばん下（反対がわの足も ふくむ）。地面に 立たせるのに 使う
+function lowY(d) {
+  let y = -Infinity;
+  for (const p of d.body) y = Math.max(y, p[1]);
+  if (d.arm) for (const p of d.arm) y = Math.max(y, p[1]);
+  if (d.leg) for (const p of d.leg) { y = Math.max(y, p[1], 2 * d.hip[1] - p[1]); }
+  return y + 4;   // 線の太さぶん
+}
+// エンディング: 倒した 10 体が 行進 → 王冠の じぶんの モンスター
+function renderEnding(now) {
+  const t = (now - endT0) / 1000;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const sky = ctx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#2a1a4f'); sky.addColorStop(1, '#6b3a1f');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  const gy = H * 0.66;
+  ctx.fillStyle = '#4b3f8f'; ctx.fillRect(0, gy, W, H - gy); ctx.fillStyle = '#ffd54f'; ctx.fillRect(0, gy, W, 4);
+  const list = RB.CPU.concat(RB.URA), sp = Math.max(160, W * 0.45), gap = 110, parade = (W + gap * list.length + 120) / sp;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (t < parade) {
+    ctx.font = '900 ' + Math.min(26, W * 0.06) + 'px sans-serif'; ctx.fillStyle = '#fff';
+    ctx.fillText('쓰러뜨린 10마리', W / 2, H * 0.18);
+    list.forEach((c, i) => {
+      const x = W + 60 + gap * i - sp * t; if (x < -80 || x > W + 80) return;
+      const hop = Math.abs(Math.sin(t * 8 + i)) * 6;
+      ctx.save(); ctx.translate(x, gy - hop - lowY(c) * 0.55); ctx.scale(-0.55, 0.55); drawRobotLocal(ctx, c, c.color, 1, false); ctx.restore();   // 足を 地面に
+      ctx.font = '800 12px sans-serif'; ctx.fillStyle = i < 5 ? '#fff' : '#ff8a80'; ctx.fillText(c.name, x, gy + 22);
+    });
+  } else {
+    const u = t - parade;
+    if (confetti.length < 160) for (let i = 0; i < 4; i++) confetti.push({ x: Math.random() * W, y: -10, vy: 60 + Math.random() * 90, vx: (Math.random() - .5) * 40, c: ['#ffd54f', '#ff5252', '#40c4ff', '#69f0ae', '#e040fb'][i % 5], r: Math.random() * 6 });
+    for (const p of confetti) { p.y += p.vy / 60; p.x += p.vx / 60; if (p.y > H) { p.y = -10; p.x = Math.random() * W; } ctx.fillStyle = p.c; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r + u * 3); ctx.fillRect(-4, -3, 8, 6); ctx.restore(); }
+    const k = Math.min(1, u / 0.6), sc = Math.min(W / 260, H / 480) * (0.6 + 0.4 * k);
+    let mx0 = Infinity, mx1 = -Infinity; for (const k of ['body', 'arm', 'leg']) for (const p of myRobot[k]) { mx0 = Math.min(mx0, p[0]); mx1 = Math.max(mx1, p[0]); }
+    ctx.save(); ctx.translate(W / 2 - (mx0 + mx1) / 2 * sc, gy - lowY(myRobot) * sc); ctx.scale(sc, sc); drawRobotLocal(ctx, myRobot, ME.color, 1, false); ctx.restore();   // 手足も入れて まんなかに
+    ctx.font = '900 ' + Math.min(44, W * 0.11) + 'px sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#1b1d3a';
+    ctx.strokeText('축하해!', W / 2, H * 0.14); ctx.fillStyle = '#ffd54f'; ctx.fillText('축하해!', W / 2, H * 0.14);
+    ctx.font = '800 ' + Math.min(18, W * 0.045) + 'px sans-serif'; ctx.fillStyle = '#fff';
+    ctx.fillText('히든 5연승 달성!', W / 2, H * 0.22); ctx.fillText('왕관을 받았다!', W / 2, H * 0.27);
+  }
+  if (t > 1.2) { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t * 4); ctx.font = '700 14px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('터치해서 다음으로', W / 2, H - 40); ctx.globalAlpha = 1; }
+}
+onTap($('vs'), startVsMode);
+onTap($('rhome'), () => { if (vs) exitVs(); else showTitle(); });
+onTap($('vstitle'), () => { if (S && S.side === 'board') showBoardSetup(); else exitVs(); });
+onTap($('handoffgo'), () => { vs.step = 2; loadInto(vsLast(2)); showDraw(); });
+// ---------- ふたりで たたかう ----------
+function padColor() { return tourDraw ? tourDraw.color : vs && vs.step === 2 ? P2.color : ME.color; }
+// 直前の 1P・2P の モンスター（端末に 覚えておく。次の ふたりで たたかう は これが 入った状態で 始まる）
+function vsLast(n) { const w = lsGet('vs.d' + n); return w ? RB.decodeDesign(w) : null; }
+function loadInto(d) { if (d) { strokes = { body: d.body, arm: d.arm, leg: d.leg }; myRobot = d; } else { strokes = { body: null, arm: null, leg: null }; myRobot = null; } }
+function startVsMode() {
+  TR('vsmode', null);
+  const backup = vs ? vs.backup : { strokes, myRobot };
+  vs = { step: 1, d1: null, d2: null, backup };
+  loadInto(vsLast(1));
+  showDraw();
+}
+function exitVs() {
+  if (vs) { strokes = vs.backup.strokes; myRobot = vs.backup.myRobot; vs = null; }
+  $('send').hidden = false;
+  showTitle();
+}
+function applyVsUi() {
+  if (!vs) { $('send').hidden = false; return; }
+  $('sidebtn').hidden = true; $('fightfriend').hidden = true; $('send').hidden = true;
+  $('fight').classList.remove('ura');
+  $('fight').innerHTML = vs.step === 1 ? '다 그렸다!<small>2P에게 넘기기</small>' : '겨루자!<small>1P 대 2P</small>';
+}
+function vsNext() {
+  if (!myRobot) return;
+  if (vs.step === 1) { vs.d1 = myRobot; lsSet('vs.d1', RB.encodeDesign(myRobot)); mode = 'handoff'; show('handoff'); }
+  else { vs.d2 = myRobot; lsSet('vs.d2', RB.encodeDesign(myRobot)); startVsBattle(); }
+}
+function startVsBattle() {
+  isFriend = true;   // 勝ち抜きの記録には 入れない
+  pA = { name: '1P', color: ME.color };
+  opp = { name: P2.name, color: P2.color, d: vs.d2 };
+  S = RB.create(vs.d1, vs.d2); S.stage = 0; S.side = 'vs'; S.crownA = !!vs.d1.crown; S.crownB = !!vs.d2.crown;
+  TR('battle', { side: 'vs', p1: RB.encodeDesign(vs.d1), p2: RB.encodeDesign(vs.d2), st1: stat4(vs.d1), st2: stat4(vs.d2) });
+  acc = 0; last = performance.now(); stop = 0; shake = 0; parts = []; pops = []; hurt = { A: 0, B: 0 }; endAt = 0; cam = null;
+  mode = 'battle'; show('none'); beginBattleFx();
+}
+// ---------- モンスターの ほぞん（3 つ）----------
+function slotDesign(i) { const w = lsGet('slot' + i); return w ? RB.decodeDesign(w) : null; }
+function renderSlots(msg) {
+  const list = $('slotlist'); list.innerHTML = '';
+  for (let i = 1; i <= 3; i++) {
+    const d = slotDesign(i), row = document.createElement('div');
+    row.className = 'slot';
+    row.innerHTML = '<b>' + i + '</b><canvas width="152" height="152"></canvas><div class="sbtns"><button class="main" data-a="save">저장</button><button class="sub" data-a="load"' + (d ? '' : ' disabled') + '>불러오기</button></div>';
+    list.appendChild(row);
+    const c = row.querySelector('canvas');
+    if (d) drawPreview(c, d, ME.color);
+    else { const g = c.getContext('2d'); g.fillStyle = 'rgba(255,255,255,.5)'; g.font = 'bold 22px sans-serif'; g.textAlign = 'center'; g.fillText('비어 있음', 76, 84); }
+    row.querySelector('[data-a="save"]').addEventListener('click', e => {
+      e.preventDefault();
+      if (!myRobot) { renderSlots('몸·팔·다리를 다 그리고 나서 저장해 줘'); return; }
+      lsSet('slot' + i, RB.encodeDesign(myRobot)); renderSlots(i + '번에 저장했어');
+    });
+    row.querySelector('[data-a="load"]').addEventListener('click', e => {
+      e.preventDefault();
+      if (!d) return;
+      const same = myRobot && RB.encodeDesign(myRobot) === RB.encodeDesign(d);
+      myRobot = d; strokes = { body: d.body, arm: d.arm, leg: d.leg }; if (!tempDraw()) lsSet('robot', RB.encodeDesign(d));
+      const reset = !tempDraw() && !same && (+(lsGet('stage') || 0) > 0 || +(lsGet('ura.stage') || 0) > 0);
+      if (reset) resetAllRuns();
+      $('slotbox').hidden = true; setPart('leg'); updateSideUi();
+      setHint(reset ? i + '번을 불러와서 연승전은 첫 상대부터 다시' : i + '번을 불러왔어');
+      sizePad(); drawPad();
+    });
+  }
+  $('slotmsg').textContent = msg || '';
+}
+onTap($('slots'), () => { renderSlots(''); $('slotbox').hidden = false; });
+onTap($('closeslots'), () => { $('slotbox').hidden = true; });
+// おもて / うら の切りかえ（おもてを クリアしたら 出る）
+function updateSideUi() {
+  $('sidebtn').hidden = !uraOpen;
+  $('sidebtn').textContent = side === 'ura' ? '히든' : '기본';
+  $('sidebtn').classList.toggle('ura', side === 'ura');
+  $('fight').innerHTML = (side === 'ura' ? '히든 ' : '') + '겨루기<small>' + (stage + 1) + ' / ' + CPUS().length + ' ' + CPUS()[stage].name + '</small>';
+  $('fight').classList.toggle('ura', side === 'ura');
+  applyVsUi(); if (typeof applyTourUi === 'function') applyTourUi();
+}
+// おもて ⇄ うら（押すたびに切りかえ）
+onTap($('sidebtn'), () => { side = side === 'ura' ? 'omote' : 'ura'; lsSet('side', side); loadSide(); updateSideUi(); setHint(side === 'ura' ? '히든 연승전: 엄청나게 센 5마리' : ''); });
+onTap($('fast'), () => { fast = !fast; TR('fast', { on: fast }); lsSet('fast', fast ? '1' : '0'); updateFastBtn(); });
+// 戦いの途中で もどる（勝ち抜きの途中経過は そのまま。戦いは決定的なので やめても 得はしない）
+onTap($('quit'), () => { if ((mode === 'battle' || mode === 'pause') && S && S.side === 'board') { if (S.replay) boardAfterReplay(); else boardBackFromBattle(); return; } if ((mode === 'battle' || mode === 'pause') && S && S.side === 'tour') { showTour(); return; } if (mode === 'battle' || mode === 'pause') { TR('quit', { side: S && S.side, stage: S && S.stage, t: S && Math.round(S.t * 10) / 10 }); showDraw(); } });
+onTap($('closeshare'), () => { $('sharebox').hidden = true; });
+onTap($('copy'), () => {
+  const ta = $('sharetext'); ta.select();
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).catch(() => {});
+  else document.execCommand('copy');
+  $('copy').textContent = '복사했어';
+  setTimeout(() => { $('copy').textContent = '글 복사'; }, 1500);
+});
+
+// ---------- 開発用 ----------
+window.ff = sec => { for (let i = 0; i < sec * RB.HZ && !S.over; i++) stepBattle(); return S.t.toFixed(1) + ' A' + S.A.hp + ' B' + S.B.hp; };
+window.sim = () => S;
+
+// ---------- 自動更新: Safari が古いページを開き続けるので、新しい版があれば読み直す ----------
+async function checkVersion() {
+  try {
+    const r = await fetch('version.txt?ts=' + Date.now(), { cache: 'no-store' });
+    const v = (await r.text()).trim();
+    if (v && v !== VERSION && mode !== 'battle') {
+      let tried = ''; try { tried = sessionStorage.getItem(KEY + 'reloadFor') || ''; } catch (e) {}
+      if (tried === v) return;
+      try { sessionStorage.setItem(KEY + 'reloadFor', v); } catch (e) {}
+      location.reload();
+    }
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkVersion(); });
+window.addEventListener('pageshow', e => { if (e.persisted) checkVersion(); });
+checkVersion();
+
+resize();
+showTitle();
+{
+  // 開発用: ?draw で描く画面、?shot=秒&stage=n で その時点のバトル、&result で結果
+  const q = new URLSearchParams(location.search);
+  const sample = () => { const c = RB.CPU[2]; myRobot = RB.design(c.body, c.arm, c.leg); strokes = { body: myRobot.body, arm: myRobot.arm, leg: myRobot.leg }; };
+  if (q.has('stage') && !q.has('shot')) stage = +q.get('stage');
+  if (q.has('beaten')) beaten = [true, true, true, true, true];   // 開発用: 早送りボタンを見る
+  if (q.get('use')) { const d = RB.decodeDesign(q.get('use')); if (d) { myRobot = withCrown(d); strokes = { body: d.body, arm: d.arm, leg: d.leg }; lsSet('robot', RB.encodeDesign(myRobot)); resetAllRuns(); showTitle(); } }   // オーナーの 確認用: その モンスターを じぶんの モンスターに
+  if (q.has('endingpreview')) { if (!myRobot) sample(); myRobot = withCrown(myRobot); myRobot.crown = true; endingPreview = true; startEnding(); }   // オーナーの 確認用: エンディングの 見本
+  if (q.has('ura')) { uraOpen = true; side = 'ura'; loadSide(); if (q.has('stage')) stage = +q.get('stage'); }   // 開発用: うら
+  if (q.has('draw')) { if (!myRobot) sample(); if (q.get('draw') === 'arm') { strokes.arm = null; strokes.leg = null; myRobot = null; } showDraw(); }
+  if (q.has('shot')) {
+    if (!myRobot) sample();
+    if (q.has('stage')) stage = +q.get('stage');
+    startBattle(q.has('friend') && !!friendRobot);
+    const t = +q.get('shot'); let n = 0;
+    while (S.t < t && !S.over && n++ < 1000000) stepBattle();
+    stop = 0; shake = 0; cam = null; hurt = { A: 0, B: 0 };
+    if (q.has('result') && S.over) endAt = -1e9;
+    else mode = 'pause';
+  }
+}
+requestAnimationFrame(frame);

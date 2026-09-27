@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#15173a">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=k1">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-title" content="몬스터 놀이터">
+<meta property="og:title" content="그려라! 몬스터 놀이터">
+<meta property="og:description" content="몸·팔·다리를 그려서 몬스터를 만들자! 뿅망치·풍선 놀이로 겨루고, 숨은 몬스터 찾기와 퍼즐도 해 보자!">
+<title>그려라! 몬스터 놀이터</title>
+<link rel="stylesheet" href="style.css?v=k1">
+</head>
+<body>
+<canvas id="game"></canvas>
+<button id="quit" class="sub" hidden>← 돌아가기</button>
+<button id="fast" class="sub" hidden>▶▶ 빨리 감기</button>
+<button id="snd" class="sub" aria-label="소리 켜기/끄기">🔊</button>
+
+<div id="title">
+  <div class="panel">
+    <div class="logo">그려라!<br>몬스터 놀이터</div>
+    <div class="lead">몸·팔·다리를 그리면<br>몬스터가 겨뤄!</div>
+    <div id="friendbox" hidden>
+      <div class="fb-title" id="fbtitle">친구의 몬스터가 도착했어!</div>
+      <canvas id="friendprev" width="240" height="240"></canvas>
+    </div>
+    <div id="tprog"></div>
+    <div class="tbtns">
+      <button id="start" class="main">몬스터 만들기</button>
+      <button id="vs" class="sub vsbtn">둘이서 대결</button>
+      <button id="tourbtn" class="sub tourbtn">🏆 학급 토너먼트</button>
+      <button id="boardbtn" class="sub boardbtn">🖥️ 전자칠판 대결</button>
+    </div>
+    <div id="themebox"><div class="tlabel">겨루기 방식</div><div id="themechips"></div></div>
+    <div class="tbtns playbtns">
+      <div class="tlabel">🎲 다른 놀이</div>
+      <button id="hidebtn" class="sub hidebtn">🔍 숨은 몬스터 찾기</button>
+      <button id="puzzlebtn" class="sub puzzlebtn">🧩 몬스터 퍼즐</button>
+    </div>
+    <div id="hallbox" hidden>
+      <div class="hall-title">👑 명예의 전당</div>
+      <div id="halllist"></div>
+    </div>
+    <div class="howto">
+      <h3>만드는 법</h3>
+      <p><b>몸</b> → <b>팔</b> → <b>다리</b> 순서로<br>한 줄씩 그려</p>
+      <p>팔은 <b>어깨</b>, 다리는 <b>허리</b>에 붙어</p>
+      <p>다리는 빙글빙글 돌면서 걸어</p>
+      <h3>강함</h3>
+      <dl class="rules">
+        <dt>크고 무거운<br>몸</dt><dd>튼튼하고 힘이 셈<br>잘 안 넘어짐</dd>
+        <dt>작고 가벼운<br>몸</dt><dd>잘 안 맞고 재빠름<br>공격 횟수가 많음</dd>
+        <dt>긴 팔</dt><dd>멀리 닿지만 가벼움</dd>
+        <dt>짧은 팔</dt><dd>연타로 쾅쾅</dd>
+      </dl>
+      <h3>노는 법</h3>
+      <p>CPU 5마리와 <b>연승전</b><br>(지면 첫 번째 상대부터)</p>
+      <p>5마리를 다 이기면… <b>무슨 일이 생길까!?</b></p>
+      <p><b>둘이서 대결</b>로<br>폰 하나로 대결</p>
+      <p>몬스터를 <b>친구에게 보내서</b><br>한판 승부</p>
+    </div>
+  </div>
+</div>
+
+<div id="draw" hidden>
+  <div class="tabs">
+    <button class="tab" data-part="body">몸</button>
+    <button class="tab" data-part="arm">팔</button>
+    <button class="tab" data-part="leg">다리</button>
+  </div>
+  <div class="dhead" id="dhead"></div>
+  <div id="namerow"><input id="mname" maxlength="8" autocomplete="off" enterkeyhint="done"></div>
+  <canvas id="pad"></canvas>
+  <div id="hint"></div>
+  <div class="stats" id="stats">
+    <div class="st"><span>튼튼함</span><div class="bar"><i id="b-hp"></i></div><em id="v-hp"></em></div>
+    <div class="st"><span>힘</span><div class="bar"><i id="b-punch"></i></div><em id="v-punch"></em></div>
+    <div class="st"><span>리치</span><div class="bar"><i id="b-reach"></i></div><em id="v-reach"></em></div>
+    <div class="st"><span>빠르기</span><div class="bar"><i id="b-speed"></i></div><em id="v-speed"></em></div>
+  </div>
+  <div class="fightrow">
+    <button id="sidebtn" class="side" hidden>기본</button>
+    <button id="fight" class="main">겨루기</button>
+    <button id="fightfriend" class="main friend" hidden>친구<small>와 겨루기</small></button>
+  </div>
+  <div class="rbtns small">
+    <button id="clearpart" class="sub">이 부분 지우기</button>
+    <button id="slots" class="sub">저장</button>
+    <button id="send" class="sub">보내기</button>
+    <button id="back" class="sub">돌아가기</button>
+  </div>
+</div>
+
+<div id="result" hidden>
+  <div class="panel">
+    <div class="rtitle" id="rtitle">이겼다!</div>
+    <div class="rsub" id="rsub"></div>
+    <div id="rprog"></div>
+    <div class="rbtns">
+      <button id="next" class="main">다음 상대로</button>
+      <button id="again" class="main">한 번 더</button>
+    </div>
+    <div class="rbtns small">
+      <button id="redraw" class="sub">몬스터 고치기</button>
+      <button id="share" class="sub">몬스터 보내기</button>
+      <button id="vstitle" class="sub" hidden>처음 화면으로</button>
+      <button id="rhome" class="sub">🏠 처음 화면으로</button>
+    </div>
+  </div>
+</div>
+
+<div id="handoff" hidden>
+  <div class="panel">
+    <div class="rtitle">2P에게 넘겨 줘</div>
+    <div class="note">1P의 몬스터는 숨겨 놨어. 2P는 보지 말고 그려 줘!</div>
+    <div class="rbtns"><button id="handoffgo" class="main">2P가 그리기</button></div>
+  </div>
+</div>
+
+<div id="slotbox" hidden>
+  <div class="panel">
+    <div class="rtitle">몬스터 저장</div>
+    <div class="note">지금 몬스터를 저장하거나, 저장한 몬스터를 불러와</div>
+    <div id="slotlist"></div>
+    <div id="slotmsg"></div>
+    <div class="rbtns"><button id="closeslots" class="sub">닫기</button></div>
+  </div>
+</div>
+
+<div id="playbox" hidden></div>
+
+<div id="boardsetup" hidden>
+  <div class="panel">
+    <div class="rtitle">🖥️ 전자칠판 대결 · 왕 지키기</div>
+    <div id="bsetbody"></div>
+  </div>
+</div>
+
+<div id="board" hidden>
+  <div class="btop">
+    <button id="bquit" class="sub">← 설정</button>
+    <div id="bmsg"></div>
+    <div id="btimer"></div>
+    <button id="bfull" class="sub" aria-label="전체 화면">⛶</button>
+  </div>
+  <div class="bpanes"><div class="bpane" id="bpL"></div><div class="bpane" id="bpR"></div></div>
+  <div class="brotate">화면을 가로로 돌려 줘 ↻<br><small>전자칠판 대결은 가로 화면 전용이야</small></div>
+</div>
+
+<div id="tourbox" hidden>
+  <div class="panel">
+    <div class="rtitle">🏆 학급 토너먼트</div>
+    <div id="tourbody"></div>
+  </div>
+</div>
+
+<div id="sharebox" hidden>
+  <div class="panel">
+    <div class="rtitle" id="sharetitle">몬스터 보내기</div>
+    <div class="note" id="sharenote"></div>
+    <canvas id="qr" width="330" height="330"></canvas>
+    <textarea id="sharetext" readonly></textarea>
+    <div class="rbtns">
+      <button id="nativeshare" class="main">카톡 등으로 보내기</button>
+      <button id="copy" class="sub">글 복사</button>
+      <button id="closeshare" class="sub">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script src="sim.js?v=k1"></script>
+<script src="theme.js?v=k1"></script>
+<script src="sfx.js?v=k1"></script>
+<script src="qrcode.js?v=k1"></script>
+<script src="game.js?v=k1"></script>
+<script src="tour.js?v=k1"></script>
+<script src="board.js?v=k1"></script>
+<script src="play.js?v=k1"></script>
+</body>
+</html>
