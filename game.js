@@ -1,6 +1,6 @@
 // かいて！モンスターバトル — 描く画面（からだ・うで・あし）・バトルの描画・勝ち抜き・モンスターを送る
 'use strict';
-const VERSION = '43';
+const VERSION = '44';
 // あそびの きろく（/t.js。なくても うごく）
 window.T_VER = VERSION;
 function TR(e, d) { try { if (window.T) window.T(e, d); } catch (err) {} }
@@ -87,7 +87,7 @@ function resize() {
   sizePad(); if (mode === 'draw') drawPad();
 }
 window.addEventListener('resize', resize);
-function show(id) { document.body.classList.toggle('inbattle', id === 'none'); document.body.classList.toggle('boardmode', id === 'board' || id === 'boardsetup'); document.body.classList.toggle('bigui', id === 'board' || id === 'boardsetup' || ((id === 'result' || id === 'none') && !!S && S.side === 'board')); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff', 'tourbox', 'board', 'boardsetup']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
+function show(id) { document.body.classList.toggle('inbattle', id === 'none'); if (id === 'result') $('rhome').hidden = !!(S && S.side === 'vs'); document.body.classList.toggle('boardmode', id === 'board' || id === 'boardsetup'); document.body.classList.toggle('bigui', id === 'board' || id === 'boardsetup' || ((id === 'result' || id === 'none') && !!S && S.side === 'board')); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff', 'tourbox', 'board', 'boardsetup']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
 // はやおくり: 一度でも倒した CPU との戦いだけ
 function canFast() { if (mode !== 'battle' || !S) return false; if (S.side === 'tour') return true; return !isFriend && !!beaten[S.stage != null ? S.stage : stage]; }
 function updateFastBtn() { $('fast').textContent = fast ? '▶ 보통 속도' : '▶▶ 빨리 감기'; $('fast').classList.toggle('on', fast); }
@@ -747,6 +747,7 @@ function renderEnding(now) {
   if (t > 1.2) { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t * 4); ctx.font = '700 14px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('터치해서 다음으로', W / 2, H - 40); ctx.globalAlpha = 1; }
 }
 onTap($('vs'), startVsMode);
+onTap($('rhome'), () => { if (vs) exitVs(); else showTitle(); });
 onTap($('vstitle'), () => { if (S && S.side === 'board') showBoardSetup(); else exitVs(); });
 onTap($('handoffgo'), () => { vs.step = 2; loadInto(vsLast(2)); showDraw(); });
 // ---------- ふたりで たたかう ----------
