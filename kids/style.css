@@ -366,3 +366,11 @@ body.boardmode #snd { top: calc(env(safe-area-inset-top) + 4px); width: 34px; he
 .hmt { font-weight: 900; font-size: 30px; color: #d08a00; }
 .hms { font-weight: 800; font-size: 14px; margin-top: 4px; }
 .pzctrl { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; flex: 0 0 auto; }
+
+/* 둘이서 놀이 */
+.dwrap { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; position: relative; }
+@media (orientation: portrait) { .dwrap { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+.dpane { position: relative; min-width: 0; min-height: 0; border: 3px solid; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 4px; }
+.dtag { color: #fff; font-weight: 900; font-size: clamp(12px, 1.6vw, 20px); padding: 1px 12px; border-radius: 999px; }
+.dcv { border-radius: 10px; touch-action: none; }
+.pinfo b { font-weight: 900; }

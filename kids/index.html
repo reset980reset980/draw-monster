@@ -6,13 +6,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#15173a">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=k1">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=k2">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-title" content="몬스터 놀이터">
 <meta property="og:title" content="그려라! 몬스터 놀이터">
 <meta property="og:description" content="몸·팔·다리를 그려서 몬스터를 만들자! 뿅망치·풍선 놀이로 겨루고, 숨은 몬스터 찾기와 퍼즐도 해 보자!">
 <title>그려라! 몬스터 놀이터</title>
-<link rel="stylesheet" href="style.css?v=k1">
+<link rel="stylesheet" href="style.css?v=k2">
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -40,6 +40,9 @@
       <div class="tlabel">🎲 다른 놀이</div>
       <button id="hidebtn" class="sub hidebtn">🔍 숨은 몬스터 찾기</button>
       <button id="puzzlebtn" class="sub puzzlebtn">🧩 몬스터 퍼즐</button>
+      <div class="tlabel">👫 둘이서 (전자칠판·가로 화면)</div>
+      <button id="spotbtn" class="sub hidebtn">🔍 틀린 그림 찾기 대결</button>
+      <button id="pduelbtn" class="sub puzzlebtn">🧩 퍼즐 대결</button>
     </div>
     <div id="hallbox" hidden>
       <div class="hall-title">👑 명예의 전당</div>
@@ -172,13 +175,14 @@
   </div>
 </div>
 
-<script src="sim.js?v=k1"></script>
-<script src="theme.js?v=k1"></script>
-<script src="sfx.js?v=k1"></script>
-<script src="qrcode.js?v=k1"></script>
-<script src="game.js?v=k1"></script>
-<script src="tour.js?v=k1"></script>
-<script src="board.js?v=k1"></script>
-<script src="play.js?v=k1"></script>
+<script src="sim.js?v=k2"></script>
+<script src="theme.js?v=k2"></script>
+<script src="sfx.js?v=k2"></script>
+<script src="qrcode.js?v=k2"></script>
+<script src="game.js?v=k2"></script>
+<script src="tour.js?v=k2"></script>
+<script src="board.js?v=k2"></script>
+<script src="play.js?v=k2"></script>
+<script src="duel.js?v=k2"></script>
 </body>
 </html>
