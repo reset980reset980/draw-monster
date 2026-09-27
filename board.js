@@ -6,6 +6,7 @@
 'use strict';
 const BCOL = { L: '#1e88e5', R: '#e53935' };
 const BLABEL = { L: '왼쪽', R: '오른쪽' };
+const BHINT = { body: '몸을 동그랗게 그려!', arm: '노란 ● 어깨에서 팔!', leg: '노란 ● 허리에서 다리!' };
 const BTIMES = [30, 45, 60, 90, 120, 180, 0];   // 0 = 무제한
 let boardTime = (() => { const v = +(lsGet('board.time') || 60); return v >= 0 && v <= 600 ? v : 60; })();
 let boardBest = (() => { try { return JSON.parse(lsGet('board.best') || 'null') || { n: 0, name: '' }; } catch (e) { return { n: 0, name: '' }; } })();
@@ -18,30 +19,38 @@ class BPad {
     this.side = side; this.color = BCOL[side];
     this.root = $('bp' + side); this.root.innerHTML = '';
     const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
-    const head = h('div', 'bhead');
-    this.sideEl = h('span', 'bside', BLABEL[side]); this.sideEl.style.background = this.color;
-    this.nameEl = h('input', 'bname'); this.nameEl.maxLength = 8; this.nameEl.placeholder = '이름 (안 써도 돼)'; this.nameEl.autocomplete = 'off';
+    // ① 이름 단계
+    const ns = h('div', 'bnamestage');
+    const chip = h('span', 'bside', BLABEL[side] + ' 도전자'); chip.style.background = this.color;
+    this.nameEl = h('input', 'bname'); this.nameEl.maxLength = 8; this.nameEl.placeholder = '이름 (안 써도 돼)'; this.nameEl.autocomplete = 'off'; this.nameEl.enterKeyHint = 'go';
     this.nameEl.addEventListener('input', () => { this.name = cleanName(this.nameEl.value); });
-    this.nameEl.addEventListener('keydown', e => { if (e.key === 'Enter') this.nameEl.blur(); });
-    this.kingEl = h('span', 'bking');
-    head.append(this.sideEl, this.nameEl, this.kingEl);
+    this.nameEl.addEventListener('keydown', e => { if (e.key === 'Enter') { this.nameEl.blur(); this.goDraw(); } });
+    const goBtn = h('button', 'main', '그리기 시작 ✏️'); goBtn.addEventListener('click', e => { e.preventDefault(); this.goDraw(); });
+    ns.append(chip, h('div', 'bask', '이름을 적고 시작해!'), this.nameEl, goBtn);
+    // ② 그리기 단계: [조작 기둥 | 그리기 판] (오른쪽 칸은 거꾸로 → 두 판이 가운데에 모임)
+    const ds = h('div', 'bdrawstage');
+    const ctrl = h('div', 'bctrl');
+    const top = h('div', 'bctop');
+    this.sideEl = h('span', 'bside', BLABEL[side]); this.sideEl.style.background = this.color;
+    this.nameTx = h('span', 'bnametx'); this.kingEl = h('span', 'bking');
+    top.append(this.sideEl, this.nameTx, this.kingEl);
     const tabs = h('div', 'btabs'); this.tabs = {};
     for (const p of ['body', 'arm', 'leg']) {
       const t = h('button', 'tab', PARTS[p]); t.addEventListener('click', e => { e.preventDefault(); this.setPart(p); });
       this.tabs[p] = t; tabs.appendChild(t);
     }
     this.hintEl = h('div', 'bhint');
+    this.statsEl = h('div', 'bstats');
+    this.clearBtn = h('button', 'sub', '지우기'); this.clearBtn.addEventListener('click', e => { e.preventDefault(); this.clearPart(); });
+    this.readyBtn = h('button', 'main', '다 그렸다!'); this.readyBtn.addEventListener('click', e => { e.preventDefault(); this.toggleReady(); });
+    this.abdicateBtn = h('button', 'sub', '왕 내려오기'); this.abdicateBtn.addEventListener('click', e => { e.preventDefault(); boardAbdicate(this.side); });
+    ctrl.append(top, tabs, this.hintEl, this.statsEl, this.clearBtn, this.readyBtn, this.abdicateBtn);
     this.wrap = h('div', 'bpadwrap');
     this.cv = h('canvas', 'bpad'); this.g = this.cv.getContext('2d');
     this.lockEl = h('div', 'block');
     this.wrap.append(this.cv, this.lockEl);
-    this.statsEl = h('div', 'bstats');
-    const btns = h('div', 'bbtns');
-    this.clearBtn = h('button', 'sub', '이 부분 지우기'); this.clearBtn.addEventListener('click', e => { e.preventDefault(); this.clearPart(); });
-    this.readyBtn = h('button', 'main', '다 그렸다!'); this.readyBtn.addEventListener('click', e => { e.preventDefault(); this.toggleReady(); });
-    this.abdicateBtn = h('button', 'sub', '왕 내려오기'); this.abdicateBtn.addEventListener('click', e => { e.preventDefault(); boardAbdicate(this.side); });
-    btns.append(this.clearBtn, this.readyBtn, this.abdicateBtn);
-    this.root.append(head, tabs, this.hintEl, this.wrap, this.statsEl, btns);
+    ds.append(ctrl, this.wrap);
+    this.root.append(ns, ds);
     this.cv.addEventListener('pointerdown', e => this.down(e));
     this.cv.addEventListener('pointermove', e => this.move(e));
     this.cv.addEventListener('pointerup', e => this.up(e));
@@ -51,9 +60,16 @@ class BPad {
   reset() {
     this.strokes = { body: null, arm: null, leg: null }; this.robot = null; this.raw = null; this.pid = null;
     this.part = 'body'; this.ready = false; this.king = false; this.name = ''; this.nameEl.value = '';
+    this.stage = 'name';
     this.hint(''); this.update();
   }
-  hint(t) { this.hintEl.textContent = t || PART_HINT[this.part].replace(/<\/?b>/g, ''); }
+  goDraw() {
+    if (this.stage === 'draw') return;
+    this.stage = 'draw'; this.update(); SFX.play('pop');
+    requestAnimationFrame(() => this.layout());
+    boardMaybeStartTimer();
+  }
+  hint(t) { this.hintEl.textContent = t || BHINT[this.part]; }
   setPart(p) { if (this.king || this.ready) return; this.part = p; this.hint(''); this.update(); }
   clearPart() { if (this.king || this.ready) return; this.strokes[this.part] = null; this.rebuild(); SFX.play('erase'); this.update(); }
   rebuild() {
@@ -76,7 +92,7 @@ class BPad {
     e.preventDefault();
     if (!board || board.phase !== 'draw') return;
     if (this.king) return;
-    if (this.ready) { this.hint('고치려면 「다시 고치기」를 눌러 줘'); return; }
+    if (this.ready) { this.hint('고치려면 「다시 고치기」'); return; }
     if (this.pid !== null) return;   // 이미 그리는 손가락이 있으면 다른 터치(손바닥 등)는 무시
     this.pid = e.pointerId; try { this.cv.setPointerCapture(e.pointerId); } catch (er) {}
     this.raw = [this.toWorld(e)];
@@ -97,13 +113,13 @@ class BPad {
     SFX.play(this.robot ? 'done' : 'pop');
     const s = this.strokes;
     this.part = !s.body ? 'body' : !s.arm ? 'arm' : !s.leg ? 'leg' : part;
-    this.hint(this.robot ? '다 됐으면 「다 그렸다!」를 눌러 줘' : ''); this.update();
+    this.hint(this.robot ? '다 됐으면 「다 그렸다!」' : ''); this.update();
   }
   toggleReady() {
     if (!board || board.phase !== 'draw' || this.king) return;
     if (this.ready) { this.ready = false; this.hint(''); this.update(); return; }
     if (!this.robot) { this.hint('몸·팔·다리를 다 그려 줘'); SFX.play('erase'); return; }
-    this.ready = true; this.hint('준비 완료! 상대를 기다리는 중…'); SFX.play('done'); this.update();
+    this.ready = true; this.hint('상대를 기다리는 중…'); SFX.play('done'); this.update();
     boardCheckGo();
   }
   // 시간 끝: 팔·다리가 없으면 기본으로 붙임. 몸이 없으면 false
@@ -149,17 +165,19 @@ class BPad {
   }
   update() {
     for (const p in this.tabs) { this.tabs[p].classList.toggle('on', p === this.part && !this.king); this.tabs[p].classList.toggle('done', !!this.strokes[p]); }
+    if (this.king) this.stage = 'draw';
+    this.root.dataset.stage = this.stage;
     this.root.classList.toggle('isking', this.king); this.root.classList.toggle('isready', this.ready);
-    this.nameEl.disabled = this.king;
+    this.nameTx.textContent = this.name;
     this.kingEl.textContent = this.king ? '👑 ' + board.streak + '연승' : '';
-    this.lockEl.innerHTML = this.king ? '👑 왕<br><small>도전자를 기다리는 중</small>' : this.ready ? '✓ 준비 완료' : '';
+    this.lockEl.innerHTML = this.king ? '👑 왕' : this.ready ? '✓ 준비 완료' : '';
     this.lockEl.hidden = !(this.king || this.ready);
-    this.clearBtn.hidden = this.king; this.readyBtn.hidden = this.king; this.abdicateBtn.hidden = !this.king;
+    this.clearBtn.hidden = this.king || this.ready; this.readyBtn.hidden = this.king; this.abdicateBtn.hidden = !this.king;
     this.readyBtn.textContent = this.ready ? '다시 고치기' : '다 그렸다!';
     this.readyBtn.disabled = !this.ready && !this.robot;
     const st = this.robot ? RB.robotStats(this.robot) : null;
-    const bar = (lbl, v, max, txt) => '<span>' + lbl + '</span><i><b style="width:' + (st ? Math.min(100, v / max * 100) : 0) + '%"></b></i><em>' + (st ? txt : '') + '</em>';
-    this.statsEl.innerHTML = bar('튼튼함', st && st.hp, 250, st && st.hp) + bar('펀치', st && st.punch, 22, st && st.punch.toFixed(0)) + bar('리치', st && st.reach, 150, st && Math.round(st.reach)) + bar('빠르기', st && st.speed, 6, st && st.speed.toFixed(1));
+    const bar = (lbl, v, max) => '<span>' + lbl + '</span><i><b style="width:' + (st ? Math.min(100, v / max * 100) : 0) + '%"></b></i>';
+    this.statsEl.innerHTML = bar('튼튼', st && st.hp, 250) + bar('펀치', st && st.punch, 22) + bar('리치', st && st.reach, 150) + bar('빠름', st && st.speed, 6);
     this.draw();
   }
   dispName() { return this.name || BLABEL[this.side]; }
@@ -169,8 +187,13 @@ class BPad {
 function showBoardSetup() {
   mode = 'boardsetup'; show('boardsetup'); SFX.music('title');
   const body = $('bsetbody'); body.innerHTML = '';
-  const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; body.appendChild(e); return e; };
+  let h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; body.appendChild(e); return e; };
+  const colL = document.createElement('div'); colL.className = 'bscol'; const colR = document.createElement('div'); colR.className = 'bscol';
+  body.classList.add('bsgrid'); body.append(colL, colR);
+  let into = colL;
+  const h0 = h; h = (tag, cls, html) => { const e = h0(tag, cls, html); into.appendChild(e); return e; };
   h('div', 'howto', '<p>① <b>왼쪽·오른쪽</b>에서 동시에 몬스터를 그려요</p><p>② 둘 다 「다 그렸다!」를 누르거나 시간이 끝나면 대결!</p><p>③ 이긴 몬스터는 <b>👑 왕</b>이 되어 자리를 지키고, 진 쪽 칸에 <b>다음 도전자</b>가 그려요</p><p>④ 시간 안에 팔·다리를 못 그리면 기본 팔·다리가 붙어요 (몸을 못 그리면 그 판은 져요)</p>');
+  into = colR;
   h('h3', 'bseth', '그리는 시간');
   const val = h('div', 'btimeval');
   const chips = h('div', 'bchips');
@@ -190,14 +213,14 @@ function showBoardSetup() {
     adj.appendChild(b);
   }
   render();
-  h('div', 'note', '학생 수준에 맞게 골라 주세요. ±버튼으로 5초 단위 조절 (10초~10분)');
+  h('div', 'note bsnote', '학생 수준에 맞게 골라 주세요. ±버튼으로 5초 단위 조절 (10초~10분)');
   const rec = h('div', 'bbest', boardBest.n ? '🏆 최고 기록: ' + esc(boardBest.name) + ' ' + boardBest.n + '연승' : '');
   const go = h('div', 'rbtns');
   const start = document.createElement('button'); start.className = 'main'; start.textContent = '시작!';
-  start.addEventListener('click', e => { e.preventDefault(); boardStart(); }); go.appendChild(start);
+  start.addEventListener('click', e => { e.preventDefault(); goFull(); boardStart(); }); go.appendChild(start);
   const etc = h('div', 'rbtns small');
   if (boardBest.n) { const b = document.createElement('button'); b.className = 'sub'; b.textContent = '최고 기록 지우기'; b.addEventListener('click', e => { e.preventDefault(); boardBest = { n: 0, name: '' }; lsSet('board.best', JSON.stringify(boardBest)); rec.textContent = ''; b.remove(); }); etc.appendChild(b); }
-  const back = document.createElement('button'); back.className = 'sub'; back.textContent = '처음 화면으로'; back.addEventListener('click', e => { e.preventDefault(); showTitle(); }); etc.appendChild(back);
+  const back = document.createElement('button'); back.className = 'sub'; back.textContent = '처음 화면으로'; back.addEventListener('click', e => { e.preventDefault(); showTitle(); }); go.appendChild(back);
 }
 function boardStart() {
   board = { pads: { L: new BPad('L'), R: new BPad('R') }, king: null, streak: 0, round: 0, endAt: 0, lastTick: 0, phase: 'draw' };
@@ -211,9 +234,17 @@ function boardRound() {
     if (board.king === k) { p.king = true; p.ready = true; p.update(); }
     else { p.reset(); }
   }
-  board.endAt = boardTime ? performance.now() + boardTime * 1000 : 0; board.lastTick = 0;
+  board.endAt = 0; board.timerOn = false; board.lastTick = 0;
   showBoard();
-  $('bmsg').textContent = board.king ? '👑 ' + board.pads[board.king].dispName() + '에게 도전! ' + BLABEL[board.king === 'L' ? 'R' : 'L'] + ' 칸에 그려 줘' : '두 사람 모두 그려 줘!';
+  $('bmsg').textContent = board.king ? '👑 ' + board.pads[board.king].dispName() + '에게 도전! 이름을 적고 「그리기 시작」' : '이름을 적고 「그리기 시작」을 눌러 줘';
+}
+function boardMaybeStartTimer() {
+  if (!board || board.timerOn || board.phase !== 'draw') return;
+  if (board.pads.L.stage !== 'draw' || board.pads.R.stage !== 'draw') return;
+  board.timerOn = true; board.lastTick = 0;
+  board.endAt = boardTime ? performance.now() + boardTime * 1000 : 0;
+  $('bmsg').textContent = board.king ? '👑 ' + board.pads[board.king].dispName() + '을(를) 이겨라!' : '그려라!';
+  SFX.play('round');
 }
 function showBoard() {
   mode = 'board'; show('board'); SFX.music('title');
@@ -222,7 +253,8 @@ function showBoard() {
 }
 function boardTimerText() {
   const el = $('btimer');
-  if (!board.endAt) { el.textContent = '⏱ 무제한'; el.className = ''; return; }
+  if (!boardTime) { el.textContent = '⏱ 무제한'; el.className = ''; return; }
+  if (!board.endAt) { el.textContent = '⏱ ' + boardTime; el.className = ''; return; }
   const left = Math.max(0, Math.ceil((board.endAt - performance.now()) / 1000));
   el.textContent = '⏱ ' + left; el.className = left <= 10 ? 'hurry' : '';
 }
@@ -250,8 +282,8 @@ function boardTimeUp() {
   if (ok.L && ok.R) { board.phase = 'go'; board.goAt = performance.now() + 1200; $('bmsg').textContent = '시간 끝! 대결 시작!'; return; }
   if (!ok.L && !ok.R) {   // 둘 다 몸을 못 그림 → 다시
     $('bmsg').textContent = '둘 다 몸을 못 그렸어! 다시 해 보자';
-    for (const k of ['L', 'R']) board.pads[k].reset();
-    board.phase = 'draw'; board.endAt = boardTime ? performance.now() + boardTime * 1000 : 0; board.lastTick = 0;
+    for (const k of ['L', 'R']) { const p = board.pads[k], n = p.name; p.reset(); p.name = n; p.nameEl.value = n; p.stage = 'draw'; p.update(); p.layout(); }
+    board.phase = 'draw'; board.timerOn = false; boardMaybeStartTimer();
     return;
   }
   boardFinish(ok.L ? 'L' : 'R', '상대가 시간 안에 몸을 못 그림', null);
@@ -294,7 +326,7 @@ function boardFinish(w, why, st) {
 function boardAbdicate(k) {
   if (board.king !== k) return;
   board.king = null; board.streak = 0;
-  const p = board.pads[k]; p.reset();
+  const p = board.pads[k]; p.reset(); board.timerOn = false; board.endAt = 0;
   $('bmsg').textContent = '왕이 내려왔어! ' + BLABEL[k] + ' 칸에도 새로 그려 줘';
   p.update();
 }
@@ -309,13 +341,27 @@ function boardReplay() {   // 방금 경기 다시 보기 (결정적이라 결�
 }
 function boardAfterReplay() { mode = 'result'; show('result'); }
 
-onTap($('boardbtn'), showBoardSetup);
+// 전체 화면(+안드로이드는 가로 고정). 누른 순간에만 허용되므로 버튼 누를 때 부름
+const canFull = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+function goFull() {
+  const d = document.documentElement;
+  if (!canFull || document.fullscreenElement || document.webkitFullscreenElement) return;
+  const p = d.requestFullscreen ? d.requestFullscreen({ navigationUI: 'hide' }) : d.webkitRequestFullscreen();
+  if (p && p.then) p.then(() => { try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) {} }).catch(() => {});
+}
+function toggleFull() {
+  if (document.fullscreenElement || document.webkitFullscreenElement) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+  else goFull();
+}
+$('bfull').hidden = !canFull;
+onTap($('bfull'), toggleFull);
+onTap($('boardbtn'), () => { goFull(); showBoardSetup(); });
 onTap($('bquit'), () => { board.phase = 'paused'; showBoardSetup(); });
 // 대결 도중 「돌아가기」: 그리던 칸으로 돌아가서 다시 준비
 function boardBackFromBattle() {
   for (const k of ['L', 'R']) { const p = board.pads[k]; if (!p.king) { p.ready = false; p.update(); } }
-  board.phase = 'draw'; board.endAt = boardTime ? performance.now() + boardTime * 1000 : 0; board.lastTick = 0;
+  board.phase = 'draw'; board.timerOn = false; board.endAt = 0; boardMaybeStartTimer();
   showBoard(); $('bmsg').textContent = '다 고쳤으면 다시 「다 그렸다!」를 눌러 줘';
 }
-window.addEventListener('resize', () => { if (mode === 'board' && board) { board.pads.L.layout(); board.pads.R.layout(); } });
+window.addEventListener('resize', () => { if (mode === 'board' && board) setTimeout(() => { board.pads.L.layout(); board.pads.R.layout(); }, 60); });
 if (/[?&]board(=|&|$)/.test(location.search)) showBoardSetup();   // 즐겨찾기용: 주소 끝에 ?board
