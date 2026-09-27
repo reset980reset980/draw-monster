@@ -1,6 +1,6 @@
 // かいて！モンスターバトル — 描く画面（からだ・うで・あし）・バトルの描画・勝ち抜き・モンスターを送る
 'use strict';
-const VERSION = '41';
+const VERSION = '42';
 // あそびの きろく（/t.js。なくても うごく）
 window.T_VER = VERSION;
 function TR(e, d) { try { if (window.T) window.T(e, d); } catch (err) {} }
@@ -87,7 +87,7 @@ function resize() {
   sizePad(); if (mode === 'draw') drawPad();
 }
 window.addEventListener('resize', resize);
-function show(id) { document.body.classList.toggle('inbattle', id === 'none'); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff', 'tourbox']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
+function show(id) { document.body.classList.toggle('inbattle', id === 'none'); document.body.classList.toggle('boardmode', id === 'board' || id === 'boardsetup'); document.body.classList.toggle('bigui', id === 'board' || id === 'boardsetup' || ((id === 'result' || id === 'none') && !!S && S.side === 'board')); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff', 'tourbox', 'board', 'boardsetup']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
 // はやおくり: 一度でも倒した CPU との戦いだけ
 function canFast() { if (mode !== 'battle' || !S) return false; if (S.side === 'tour') return true; return !isFriend && !!beaten[S.stage != null ? S.stage : stage]; }
 function updateFastBtn() { $('fast').textContent = fast ? '▶ 보통 속도' : '▶▶ 빨리 감기'; $('fast').classList.toggle('on', fast); }
@@ -391,13 +391,14 @@ function frame(now) {
   } else if (mode === 'draw') drawPad();
   else if (mode === 'pause') renderBattle(0);
   else if (mode === 'ending') renderEnding(now);
+  else if (mode === 'board' && typeof boardFrame === 'function') boardFrame(now);
   requestAnimationFrame(frame);
 }
 
 // カメラ: 2 体が入るように寄る
 function camera() {
   const x0 = Math.min(S.A.x, S.B.x) - 115, x1 = Math.max(S.A.x, S.B.x) + 115;
-  const cx = (x0 + x1) / 2, k = Math.min(W / (x1 - x0), (H - 200) / 300, 1.7);
+  const cx = (x0 + x1) / 2, k = Math.min(W / (x1 - x0), (H - 200 * hudScale()) / 300, 1.7 * hudScale());
   if (!cam) cam = { x: cx, k };
   cam.x += (cx - cam.x) * 0.1; cam.k += (k - cam.k) * 0.06;
   return cam;
@@ -475,7 +476,14 @@ function drawRobotWorld(b, color, flash, crown) {
   limb(ctx, legA, '#455a64', 1);
   arm(ctx, joint(b.arm), color);
 }
+// 전자칠판처럼 큰 화면의 대결은 글자·체력바를 키움
+function hudScale() { return S && S.side === 'board' ? Math.max(1, Math.min(2.2, Math.min(W, H * 1.6) / 900)) : 1; }
 function drawHud() {
+  const u = hudScale(); if (u === 1) { drawHud0(); return; }
+  const w0 = W, h0 = H; ctx.save(); ctx.scale(u, u); W = w0 / u; H = h0 / u;
+  try { drawHud0(); } finally { W = w0; H = h0; ctx.restore(); }
+}
+function drawHud0() {
   const top = 12, bw = (W - 110) / 2;
   const bar = (x, hp, max, name, col, right) => {
     ctx.font = '800 14px sans-serif'; ctx.textBaseline = 'alphabetic'; ctx.textAlign = right ? 'right' : 'left'; ctx.fillStyle = '#fff';
@@ -499,7 +507,7 @@ function drawHud() {
     else { const k = (t - (INTRO - INTRO_FIGHT)) / 180; big('파이트!', '#ffd54f', 1, 2.2 - 1.2 * ease(k)); }
   } else if (S.t < 0.5) big('파이트!', '#ffd54f', 1 - S.t / 0.5);
   if (S.over) {
-    const wc = S.side === 'vs' || S.side === 'tour' || S.winner === 'A' ? '#ffd54f' : '#ff5252';
+    const wc = S.side === 'vs' || S.side === 'tour' || S.side === 'board' || S.winner === 'A' ? '#ffd54f' : '#ff5252';
     if (S.reason === 'ko') {
       const k = koT ? (now - koT) / 260 : 9;
       big('K.O.', wc, 1, 2.6 - 1.6 * ease(k));
@@ -574,6 +582,8 @@ function showResult() {
   TR('result', { side: S.side, stage: S.stage, opp: opp && opp.name, win: S.winner === 'A' ? 'win' : S.winner === 'B' ? 'lose' : 'draw', reason: S.reason, t: Math.round(S.t * 10) / 10, hp: [Math.ceil(S.A.hp), Math.ceil(S.B.hp)], hits: [S.A.hits, S.B.hits], dmg: [Math.round(S.A.dealt), Math.round(S.B.dealt)], fast: fast });
   $('share').hidden = false; $('vstitle').hidden = true; $('redraw').hidden = false; $('redraw').textContent = '몬스터 고치기';
   $('next').textContent = '다음 상대로'; $('next').classList.remove('ura'); $('again').className = 'main'; goUra = false;
+  $('vstitle').textContent = '처음 화면으로';
+  if (S.side === 'board') { if (S.replay) boardAfterReplay(); else boardResult(); return; }
   if (S.side === 'tour') { tourResult(); return; }
   if (S.side === 'vs') {
     $('rtitle').textContent = S.winner === 'A' ? '1P 승리!' : S.winner === 'B' ? '2P 승리!' : '무승부';
@@ -661,8 +671,8 @@ onTap($('send'), shareRobot);
 onTap($('share'), shareRobot);
 onTap($('clearpart'), () => { SFX.play('erase'); strokes[part] = null; if (!tempDraw()) resetAllRuns(); saveRobot(); setPart(part); updateSideUi(); });
 let goUra = false;   // おもてを クリアした 直後: つぎへ ボタンが「うらへ」
-onTap($('next'), () => { if (S && S.side === 'tour') showTour(); else if (vs) startVsMode(); else if (goUra) { goUra = false; side = 'ura'; lsSet('side', side); loadSide(); updateSideUi(); TR('gotoura', { from: 'result' }); startBattle(false); } else startBattle(false); });
-onTap($('again'), () => { if (S && S.side === 'tour') startTourMatch(tour.cur); else if (S && S.side === 'vs') startVsBattle(); else startBattle(isFriend); });
+onTap($('next'), () => { if (S && S.side === 'board') boardRound(); else if (S && S.side === 'tour') showTour(); else if (vs) startVsMode(); else if (goUra) { goUra = false; side = 'ura'; lsSet('side', side); loadSide(); updateSideUi(); TR('gotoura', { from: 'result' }); startBattle(false); } else startBattle(false); });
+onTap($('again'), () => { if (S && S.side === 'board') boardReplay(); else if (S && S.side === 'tour') startTourMatch(tour.cur); else if (S && S.side === 'vs') startVsBattle(); else startBattle(isFriend); });
 onTap($('redraw'), () => { if (vs) startVsMode(); else showDraw(); });
 // ---------- うら 5 人抜き: 王冠・でんどういり・エンディング ----------
 let endT0 = 0, confetti = [];
@@ -737,7 +747,7 @@ function renderEnding(now) {
   if (t > 1.2) { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t * 4); ctx.font = '700 14px sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('터치해서 다음으로', W / 2, H - 40); ctx.globalAlpha = 1; }
 }
 onTap($('vs'), startVsMode);
-onTap($('vstitle'), exitVs);
+onTap($('vstitle'), () => { if (S && S.side === 'board') showBoardSetup(); else exitVs(); });
 onTap($('handoffgo'), () => { vs.step = 2; loadInto(vsLast(2)); showDraw(); });
 // ---------- ふたりで たたかう ----------
 function padColor() { return tourDraw ? tourDraw.color : vs && vs.step === 2 ? P2.color : ME.color; }
@@ -822,7 +832,7 @@ function updateSideUi() {
 onTap($('sidebtn'), () => { side = side === 'ura' ? 'omote' : 'ura'; lsSet('side', side); loadSide(); updateSideUi(); setHint(side === 'ura' ? '히든 연승전: 엄청나게 센 5마리' : ''); });
 onTap($('fast'), () => { fast = !fast; TR('fast', { on: fast }); lsSet('fast', fast ? '1' : '0'); updateFastBtn(); });
 // 戦いの途中で もどる（勝ち抜きの途中経過は そのまま。戦いは決定的なので やめても 得はしない）
-onTap($('quit'), () => { if ((mode === 'battle' || mode === 'pause') && S && S.side === 'tour') { showTour(); return; } if (mode === 'battle' || mode === 'pause') { TR('quit', { side: S && S.side, stage: S && S.stage, t: S && Math.round(S.t * 10) / 10 }); showDraw(); } });
+onTap($('quit'), () => { if ((mode === 'battle' || mode === 'pause') && S && S.side === 'board') { if (S.replay) boardAfterReplay(); else boardBackFromBattle(); return; } if ((mode === 'battle' || mode === 'pause') && S && S.side === 'tour') { showTour(); return; } if (mode === 'battle' || mode === 'pause') { TR('quit', { side: S && S.side, stage: S && S.stage, t: S && Math.round(S.t * 10) / 10 }); showDraw(); } });
 onTap($('closeshare'), () => { $('sharebox').hidden = true; });
 onTap($('copy'), () => {
   const ta = $('sharetext'); ta.select();

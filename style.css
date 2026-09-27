@@ -22,7 +22,7 @@ button { font: inherit; }
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
   padding: 16px; background: rgba(10, 12, 30, .55);
 }
-#tourbox[hidden], #namerow[hidden], #hallbox[hidden], #title[hidden], #result[hidden], #sharebox[hidden], #slotbox[hidden], #handoff[hidden], #draw[hidden], #friendbox[hidden], button[hidden] { display: none; }
+#board[hidden], #boardsetup[hidden], .block[hidden], #tourbox[hidden], #namerow[hidden], #hallbox[hidden], #title[hidden], #result[hidden], #sharebox[hidden], #slotbox[hidden], #handoff[hidden], #draw[hidden], #friendbox[hidden], button[hidden] { display: none; }
 .panel {
   width: min(92vw, 400px); max-height: calc(100% - 20px); overflow-y: auto;
   background: var(--paper); border: 4px solid var(--ink); border-radius: 18px; box-shadow: var(--shadow);
@@ -235,3 +235,65 @@ button.tx { flex: 0 0 auto; padding: 2px 8px; font-size: 12px; border-width: 2px
 .tchamp-t { font-weight: 900; font-size: 18px; color: #b8860b; }
 .tchamp .tprev { width: 110px; height: 110px; display: block; margin: 6px auto; }
 .tchamp-n { font-weight: 900; font-size: 24px; color: var(--ink); }
+
+/* 전자칠판 대결 */
+.boardbtn { margin-top: 0; background: #e3f2fd; }
+#boardsetup { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(10, 12, 30, .72); }
+#boardsetup .panel { width: min(94vw, 560px); }
+#boardsetup .howto { font-size: 14px; }
+.bseth { margin: 12px 0 4px; font-size: 16px; color: var(--hot); }
+.btimeval { font-weight: 900; font-size: 40px; color: var(--ink); }
+.bchips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 6px; }
+button.chip { font-size: 15px; padding: 6px 12px; border-width: 2px; box-shadow: 0 2px 0 var(--ink); }
+button.chip.on { background: #ffd54f; }
+.bbest { margin-top: 10px; font-weight: 800; color: #b8860b; min-height: 1em; }
+
+#board { position: fixed; inset: 0; display: flex; flex-direction: column; background: #15173a; padding: calc(env(safe-area-inset-top) + 6px) 10px 10px; gap: 6px; }
+.btop { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding-right: 50px; }
+#bquit { font-size: 14px; padding: 6px 12px; border-width: 2px; box-shadow: 0 2px 0 var(--ink); }
+#bmsg { color: #fff; font-weight: 900; font-size: clamp(14px, 2vw, 24px); text-align: center; }
+#btimer { color: #fff; font-weight: 900; font-size: clamp(22px, 3.4vw, 44px); font-variant-numeric: tabular-nums; min-width: 3.5em; text-align: right; }
+#btimer.hurry { color: #ff5252; animation: bpulse .5s ease-in-out infinite alternate; }
+@keyframes bpulse { to { transform: scale(1.12); } }
+.bpanes { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.bpane { min-height: 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; border-radius: 16px; border: 3px solid rgba(124,131,255,.35); background: rgba(255,255,255,.03); }
+#bpL { border-color: rgba(30,136,229,.7); } #bpR { border-color: rgba(229,57,53,.7); }
+.bpane.isking { box-shadow: 0 0 0 3px #ffd54f, 0 0 24px rgba(255,213,79,.4); }
+.bhead { display: flex; align-items: center; gap: 8px; width: 100%; }
+.bside { color: #fff; font-weight: 900; font-size: clamp(13px, 1.6vw, 20px); padding: 3px 10px; border-radius: 999px; flex: 0 0 auto; }
+.bname { flex: 1 1 auto; min-width: 0; font: inherit; font-weight: 800; font-size: clamp(13px, 1.5vw, 20px); padding: 5px 10px; border-radius: 10px; border: 2px solid #7c83ff; background: rgba(255,255,255,.08); color: #fff; }
+.bname::placeholder { color: rgba(255,255,255,.4); }
+.bname:disabled { opacity: .9; border-color: #ffd54f; }
+.bking { flex: 0 0 auto; color: #ffd54f; font-weight: 900; font-size: clamp(14px, 1.8vw, 22px); }
+.btabs { display: flex; gap: 6px; }
+.btabs .tab { font-size: clamp(13px, 1.6vw, 20px); padding: 5px 16px; }
+.bpane.isking .btabs { visibility: hidden; }
+.bhint { color: #ffe082; font-weight: 800; font-size: clamp(12px, 1.4vw, 18px); min-height: 1.3em; text-align: center; }
+.bpadwrap { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+.bpad { touch-action: none; border-radius: 12px; border: 3px solid #7c83ff; }
+.block { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); padding: 6px 16px; border-radius: 12px; background: rgba(21,23,58,.85); border: 2px solid #ffd54f; color: #ffd54f; font-weight: 900; font-size: clamp(14px, 1.8vw, 24px); text-align: center; pointer-events: none; }
+.block small { font-size: .6em; color: #fff; font-weight: 700; }
+.bpane.isready:not(.isking) .bpad { opacity: .75; }
+.bstats { display: grid; grid-template-columns: repeat(2, auto minmax(40px, 1fr) 2.2em); gap: 3px 6px; width: min(100%, 420px); align-items: center; color: #c5c8ff; font-size: clamp(11px, 1.2vw, 15px); font-weight: 800; }
+.bstats i { display: block; height: 8px; border-radius: 4px; background: rgba(255,255,255,.15); overflow: hidden; }
+.bstats i b { display: block; height: 100%; background: linear-gradient(90deg, #7c83ff, #ffd600); }
+.bstats em { font-style: normal; color: #ffd600; text-align: right; }
+.bbtns { display: flex; gap: 8px; justify-content: center; }
+.bbtns button { font-size: clamp(14px, 1.7vw, 22px); padding: 8px 18px; }
+.brotate { display: none; }
+@media (orientation: portrait) {
+  #board .btop, #board .bpanes { display: none; }
+  #board .brotate { display: flex; flex: 1; align-items: center; justify-content: center; flex-direction: column; color: #fff; font-weight: 900; font-size: 22px; text-align: center; }
+}
+body.boardmode #snd { top: calc(env(safe-area-inset-top) + 8px); }
+
+/* 전자칠판(큰 가로 화면): 설정·결과 창과 대결 중 버튼을 키움 */
+@media (min-width: 1200px) and (min-height: 650px) {
+  body.bigui .panel { zoom: 1.45; }
+  body.bigui.inbattle #quit { top: calc(env(safe-area-inset-top) + 110px); font-size: 16px; padding: 6px 14px; }
+  body.bigui.inbattle #snd { top: calc(env(safe-area-inset-top) + 110px); }
+}
+@media (min-width: 1700px) and (min-height: 950px) {
+  body.bigui .panel { zoom: 1.6; }
+  body.bigui.inbattle #quit, body.bigui.inbattle #snd { top: calc(env(safe-area-inset-top) + 140px); }
+}

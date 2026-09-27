@@ -88,6 +88,7 @@ const SFX = (() => {
       noise({ type: 'bandpass', f: 400, f2: 4000, q: 1.5, dur: 0.5, vol: 0.3 });
       const t = ctx.currentTime + 0.45; tone({ type: 'sine', f: 110, f2: 50, dur: 0.25, vol: 0.7, at: t }); noise({ f: 1500, f2: 200, dur: 0.15, vol: 0.3, at: t });
     },
+    tick() { tone({ type: 'square', f: 1480, dur: 0.07, vol: 0.12 }); },
     fight() {   // 징
       [110, 164.8, 233, 311].forEach((f, i) => tone({ type: 'sine', f, f2: f * 0.985, dur: 1.6 - i * 0.2, vol: 0.28 - i * 0.05, atk: 0.01 }));
       noise({ f: 5000, f2: 800, dur: 0.25, vol: 0.25 });
@@ -105,7 +106,7 @@ const SFX = (() => {
     draw() { notes([64, 62, 64, null, 60], 'square', 0.13, 0.12); },
     fanfare() { notes([60, 60, 60, 60, null, 56, null, 58, null, 60, null, 58, 60, null, null, null, 67, 67, 67, 72], 'square', 0.16, 0.11); notes([48, null, 48, null, 44, null, 46, null, 48, null, 46, 48, null, null, null, null, 55, null, 55, 60], 'triangle', 0.3, 0.11); },
   };
-  const GAP = { hit: 0.05, tap: 0.03, pop: 0.05 };
+  const GAP = { hit: 0.05, tap: 0.03, pop: 0.05, tick: 0.3 };
   function play(name, arg) {
     if (!ready() || !S[name]) return;
     const now = ctx.currentTime;
