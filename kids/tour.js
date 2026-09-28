@@ -1,5 +1,5 @@
 // 학급 토너먼트 — 여러 몬스터를 모아 대진표를 짜고, 경기를 보거나 결과만 빠르게 내서 우승자를 가림
-// 참가: ① 이 기기에서 돌아가며 그리기 ② 내 몬스터 ③ 받은 친구 몬스터 ④ 공유 링크 붙여넣기(여러 개 한 번에)
+// 참가자는 교실 대결 로비(lobby.js)에서 각자 기기로 그려 보낸 몬스터
 // 경기는 물리가 결정적이라, 직접 보나 결과만 내나 승자가 같음
 'use strict';
 const TOUR_MAX = 32;
@@ -111,35 +111,13 @@ function tourResult() {
   SFX.play(champion() !== null ? 'clear' : 'win');
 }
 
-// ---------- 이 기기에서 그려서 참가 ----------
-function tourDrawStart() {
-  tourDraw = { backup: { strokes, myRobot }, name: '', color: tColor(tour.entries.length) };
-  loadInto(null);
-  showDraw();
-  setHint('다 그리면 아래 「참가 등록」을 눌러 줘');
-}
-function tourDrawRestore() { if (tourDraw) { strokes = tourDraw.backup.strokes; myRobot = tourDraw.backup.myRobot; tourDraw = null; } }
-function tourDrawCancel() { tourDrawRestore(); showTour(); }
-function tourDrawDone() {
-  if (!myRobot) return;
-  const msg = addEntry(plainCode(myRobot), tourDraw.name), name = tour.entries.length ? tName(tour.entries.length - 1) : '';
-  tourDrawRestore();
-  showTour(msg || '「' + name + '」 등록 완료! 다음 친구가 그릴 차례야', !msg);
-}
-function applyTourUi() {
-  if (!tourDraw) return;
-  $('sidebtn').hidden = true; $('fightfriend').hidden = true; $('send').hidden = true; $('slots').hidden = true;
-  $('fight').classList.remove('ura');
-  $('fight').innerHTML = '참가 등록!<small>' + (tour.entries.length + 1) + '번째 참가자</small>';
-}
-
 // ---------- 화면 ----------
-let tourMsg = '', tourPaste = false;
-function showTour(msg, drewOne) {
+let tourMsg = '';
+function showTour(msg) {
   $('slots').hidden = false;
   mode = 'tour'; show('tourbox'); SFX.music('title');
   tourMsg = msg || '';
-  renderTour(drewOne);
+  renderTour();
 }
 function previewCanvas(i, size) {
   const c = document.createElement('canvas'); c.width = c.height = size * 2; c.className = 'tprev';
@@ -148,62 +126,18 @@ function previewCanvas(i, size) {
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function btn(cls, text, fn, disabled) { const b = el('button', cls, text); b.disabled = !!disabled; b.addEventListener('click', e => { e.preventDefault(); fn(); }); return b; }
 
-function renderTour(drewOne) {
+function renderTour() {
   const body = $('tourbody'); body.innerHTML = '';
   if (tourMsg) body.appendChild(el('div', 'tmsg', tourMsg));
-  if (!tour.rounds) renderSetup(body, drewOne); else renderBracket(body);
+  if (!tour.rounds) renderSetup(body); else renderBracket(body);
 }
-function renderSetup(body, drewOne) {
-  body.appendChild(el('div', 'note', '참가 몬스터를 2~' + TOUR_MAX + '마리 모아 줘 (지금 ' + tour.entries.length + '마리)'));
-  if (drewOne) body.appendChild(el('div', 'rbtns', null)).appendChild(btn('main', '다음 친구 그리기 ✏️', tourDrawStart, tour.entries.length >= TOUR_MAX));
-  const list = el('div', 'tlist');
-  tour.entries.forEach((e, i) => {
-    const row = el('div', 'tentry');
-    row.appendChild(previewCanvas(i, 40));
-    row.appendChild(el('span', 'tname', e.n));
-    row.appendChild(btn('sub tx', '✕', () => { tour.entries.splice(i, 1); tour.rounds = null; saveTour(); tourMsg = ''; renderTour(); }));
-    list.appendChild(row);
-  });
-  if (!tour.entries.length) list.appendChild(el('div', 'tempty', '아직 참가자가 없어'));
-  body.appendChild(list);
-
-  const add = el('div', 'tadd');
-  const full = tour.entries.length >= TOUR_MAX;
-  if (!drewOne) add.appendChild(btn('main', '✏️ 이 기기에서 그려서 추가', tourDrawStart, full));
-  if (myRobot) add.appendChild(btn('sub', '내 몬스터 추가' + (myName ? ' (' + myName + ')' : ''), () => { tourMsg = addEntry(plainCode(myRobot), myName || '선생님') || '내 몬스터를 추가했어'; renderTour(); }, full));
-  if (friendRobot) add.appendChild(btn('sub', '받은 친구 몬스터 추가', () => { tourMsg = addEntry(plainCode(friendRobot), FRIEND.name !== '친구' ? FRIEND.name : '') || '친구 몬스터를 추가했어'; renderTour(); }, full));
-  add.appendChild(btn('sub', '🔗 받은 링크 붙여넣기', () => { tourPaste = !tourPaste; renderTour(); }, full));
-  body.appendChild(add);
-  if (tourPaste) {
-    const box = el('div', 'tpaste');
-    box.appendChild(el('div', 'note', '아이들이 보낸 몬스터 링크(카톡 글)를 여러 개 한꺼번에 붙여 넣어도 돼'));
-    const ta = el('textarea'); ta.id = 'tpastetext'; ta.placeholder = '여기에 붙여넣기'; box.appendChild(ta);
-    box.appendChild(btn('main', '추가하기', () => {
-      const found = [...ta.value.matchAll(/[#&]r=([A-Za-z0-9_-]+)(?:&n=([^\s&]+))?/g)];
-      let ok = 0, bad = 0, msg = '';
-      for (const m of found) {
-        let n = ''; try { n = m[2] ? decodeURIComponent(m[2]) : ''; } catch (e) {}
-        const err = addEntry(m[1], n); if (err) { bad++; msg = err; } else ok++;
-      }
-      tourPaste = false;
-      tourMsg = found.length ? ok + '마리 추가했어' + (bad ? ' (' + bad + '개 실패: ' + msg + ')' : '') : '몬스터 링크를 찾지 못했어';
-      renderTour();
-    }));
-    body.appendChild(box);
-  }
-  const go = el('div', 'rbtns');
-  go.appendChild(btn('main tgo', '🏆 대진표 만들기', () => { makeBracket(); tourMsg = ''; renderTour(); SFX.play('round'); }, tour.entries.length < 2));
-  body.appendChild(go);
-  const etc = el('div', 'rbtns small');
-  etc.appendChild(btn('sub', '📱 게임 주소 QR', () => showShareBox('게임 주소', '폰 카메라로 찍으면 게임이 열려. 몬스터를 그리고 「보내기」로 선생님께 보내 줘!', '그려라! 몬스터 배틀\n' + SITE_URL, SITE_URL)));
-  if (tour.entries.length) etc.appendChild(btn('sub', '참가자 모두 지우기', () => { if (confirmClear()) { tour = { entries: [], rounds: null, cur: null, champShown: false }; saveTour(); tourMsg = ''; renderTour(); } }));
-  etc.appendChild(btn('sub', '처음 화면으로', showTitle));
-  body.appendChild(etc);
-}
-let clearArmed = 0;
-function confirmClear() {   // 두 번 눌러야 지워짐 (브라우저 확인창은 쓰지 않음)
-  if (Date.now() - clearArmed < 3000) { clearArmed = 0; return true; }
-  clearArmed = Date.now(); tourMsg = '한 번 더 누르면 모두 지워져'; renderTour(); return false;
+// 대진표가 없을 때: 학급 토너먼트는 로비(각자 기기로 그리기)에서 시작
+function renderSetup(body) {
+  body.appendChild(el('div', 'note', '학급 토너먼트는 「🏆 학급 토너먼트」 로비에서 방을 만들고, 아이들이 각자 기기로 그린 몬스터로 시작해요.'));
+  const row = el('div', 'rbtns');
+  row.appendChild(btn('main', '🏆 로비로 가기', () => showLobby()));
+  row.appendChild(btn('sub', '처음 화면으로', showTitle));
+  body.appendChild(row);
 }
 function renderBracket(body) {
   const ch = champion();
@@ -253,8 +187,6 @@ function renderBracket(body) {
   const etc = el('div', 'rbtns small');
   if (nx) etc.appendChild(btn('sub', '⚡ 남은 경기 모두 결과만', () => { let at; while ((at = nextMatch())) simQuick(at); tourMsg = ''; renderTour(); }));
   etc.appendChild(btn('sub', '🔀 대진 다시 섞기', () => { makeBracket(); tourMsg = '대진을 다시 섞었어'; renderTour(); }));
-  etc.appendChild(btn('sub', '참가자 바꾸기', () => { tour.rounds = null; tour.cur = null; saveTour(); tourMsg = ''; renderTour(); }));
   etc.appendChild(btn('sub', '처음 화면으로', showTitle));
   body.appendChild(etc);
 }
-onTap($('tourbtn'), () => showTour());

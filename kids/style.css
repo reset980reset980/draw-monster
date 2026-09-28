@@ -416,3 +416,14 @@ button.lx { border: 0; background: transparent; font-size: 12px; padding: 0 4px;
 
 @media (min-width: 1200px) and (min-height: 650px) { #lobbybox .panel { zoom: 1.3; } }
 @media (min-width: 1700px) and (min-height: 950px) { #lobbybox .panel { zoom: 1.6; } }
+
+/* 방 카드 누르기 · 선생님 안내 */
+.lroom.can { cursor: pointer; transition: transform .08s; }
+.lroom.can:active { transform: scale(.98); }
+.lroom.can:hover { box-shadow: 0 0 0 3px #7c83ff; }
+.lroom.shut { opacity: .55; }
+.lrtap { align-self: flex-end; font-size: 14px; font-weight: 900; color: #fff; background: var(--hot); border-radius: 999px; padding: 4px 14px; }
+.lroom.shut .lrtap { background: #999; }
+.lhowbox { background: #fff; border: 3px solid var(--ink); border-radius: 14px; padding: 10px 14px; text-align: left; min-width: 220px; }
+.lhstep { font-weight: 900; font-size: clamp(15px, 1.8vw, 22px); margin: 4px 0; }
+.lhurl { font-weight: 900; font-size: clamp(16px, 2.2vw, 28px); color: #1e88e5; margin: 2px 0 8px 1.2em; word-break: break-all; }

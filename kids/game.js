@@ -1,6 +1,6 @@
 // かいて！モンスターバトル — 描く画面（からだ・うで・あし）・バトルの描画・勝ち抜き・モンスターを送る
 'use strict';
-const VERSION = 'l1';
+const VERSION = 'l2';
 // あそびの きろく（/t.js。なくても うごく）
 window.T_VER = VERSION;
 function TR(e, d) { try { if (window.T) window.T(e, d); } catch (err) {} }
@@ -75,9 +75,7 @@ let friendRobot = null;
 { const m = /[#&]r=([A-Za-z0-9_-]+)/.exec(location.hash); if (m) friendRobot = RB.decodeDesign(m[1]); }
 { const m = /[#&]n=([^&]+)/.exec(location.hash); if (m && friendRobot) { try { const n = cleanName(decodeURIComponent(m[1])); if (n) FRIEND.name = n; } catch (e) {} } }
 myName = cleanName(lsGet('name'));
-// 토너먼트 참가자를 이 기기에서 그리는 중인지 (그동안 내 몬스터·기록은 건드리지 않음)
-let tourDraw = null;
-const tempDraw = () => !!(vs || tourDraw);
+const tempDraw = () => !!vs;
 
 // ---------- 画面 ----------
 function resize() {
@@ -111,8 +109,8 @@ function showDraw() {
   if (!strokes.body) part = 'body'; else if (!strokes.arm) part = 'arm'; else if (!strokes.leg) part = 'leg';
   $('fightfriend').hidden = !friendRobot;
   $('namerow').hidden = !!vs;
-  $('mname').value = tourDraw ? tourDraw.name : myName;
-  $('mname').placeholder = tourDraw ? '참가자 이름 (예: 민준)' : '몬스터 이름 (안 써도 돼)';
+  $('mname').value = myName;
+  $('mname').placeholder = '몬스터 이름 (안 써도 돼)';
   updateSideUi();
   setPart(part);
   if (vs) setHint((vs.step === 1 ? '1P' : '2P') + ' 몬스터를 그려 줘' + (myRobot ? '(전에 그린 몬스터가 들어 있어)' : ''));
@@ -348,8 +346,7 @@ function saveRobot() {
 }
 $('mname').addEventListener('input', () => {
   const n = cleanName($('mname').value);
-  if (tourDraw) tourDraw.name = n;
-  else if (!vs) { myName = n; lsSet('name', n); }
+  if (!vs) { myName = n; lsSet('name', n); }
 });
 $('mname').addEventListener('keydown', e => { if (e.key === 'Enter') $('mname').blur(); });
 function setHint(t) { $('hint').textContent = t; }
@@ -745,8 +742,8 @@ function onTap(el, fn) { el.addEventListener('click', e => { e.preventDefault();
 onTap($('start'), showDraw);
 // タイトルの文字を 5 回つづけてタップ → うら テストの印（ホーム画面のアプリは Safari と保存場所が別なので）
 { let n = 0, t0 = 0; $('title').querySelector('.logo').addEventListener('click', () => { const now = Date.now(); n = now - t0 < 800 ? n + 1 : 1; t0 = now; if (n >= 5) { n = 0; lsSet('uratest', '1'); URA_TEST = true; uraOpen = true; showTitle(); } }); }
-onTap($('back'), () => { if (tourDraw) tourDrawCancel(); else if (vs) exitVs(); else showTitle(); });
-onTap($('fight'), () => { if (typeof onlineDraw !== 'undefined' && onlineDraw) { lsubmit(); return; } if (tourDraw) tourDrawDone(); else if (vs) vsNext(); else startBattle(false); });
+onTap($('back'), () => { if (vs) exitVs(); else showTitle(); });
+onTap($('fight'), () => { if (typeof onlineDraw !== 'undefined' && onlineDraw) { lsubmit(); return; } if (vs) vsNext(); else startBattle(false); });
 onTap($('fightfriend'), () => startBattle(true));
 onTap($('send'), shareRobot);
 onTap($('share'), shareRobot);
@@ -832,7 +829,7 @@ onTap($('rhome'), () => { if (vs) exitVs(); else showTitle(); });
 onTap($('vstitle'), () => { if (S && S.side === 'board') showBoardSetup(); else exitVs(); });
 onTap($('handoffgo'), () => { vs.step = 2; loadInto(vsLast(2)); showDraw(); });
 // ---------- ふたりで たたかう ----------
-function padColor() { return tourDraw ? tourDraw.color : vs && vs.step === 2 ? P2.color : ME.color; }
+function padColor() { return vs && vs.step === 2 ? P2.color : ME.color; }
 // 直前の 1P・2P の モンスター（端末に 覚えておく。次の ふたりで たたかう は これが 入った状態で 始まる）
 function vsLast(n) { const w = lsGet('vs.d' + n); return w ? RB.decodeDesign(w) : null; }
 function loadInto(d) { if (d) { strokes = { body: d.body, arm: d.arm, leg: d.leg }; myRobot = d; } else { strokes = { body: null, arm: null, leg: null }; myRobot = null; } }
@@ -908,7 +905,7 @@ function updateSideUi() {
   $('sidebtn').classList.toggle('ura', side === 'ura');
   $('fight').innerHTML = (side === 'ura' ? '히든 ' : '') + '겨루기<small>' + (stage + 1) + ' / ' + CPUS().length + ' ' + CPUS()[stage].name + '</small>';
   $('fight').classList.toggle('ura', side === 'ura');
-  applyVsUi(); if (typeof applyTourUi === 'function') applyTourUi(); if (typeof applyOnlineUi === 'function') applyOnlineUi();
+  applyVsUi(); if (typeof applyOnlineUi === 'function') applyOnlineUi();
 }
 // おもて ⇄ うら（押すたびに切りかえ）
 onTap($('sidebtn'), () => { side = side === 'ura' ? 'omote' : 'ura'; lsSet('side', side); loadSide(); updateSideUi(); setHint(side === 'ura' ? '히든 연승전: 엄청나게 센 5마리' : ''); });

@@ -96,17 +96,19 @@ function lrender() {
 }
 function roomState(r) { return r.phase === 'wait' ? (r.hostOnline ? '들어갈 수 있어' : '선생님 연결 기다리는 중') : r.phase === 'draw' || r.phase === 'closing' ? '✏️ 그리는 중' : '⚔️ 대결 중'; }
 function lviewList(body) {
-  $('lobbytitle').textContent = '🌐 교실 대결 로비';
-  body.appendChild(lel('div', 'note', '우리 반 방을 골라서 들어가! 방이 없으면 선생님이 먼저 만들어야 해'));
+  $('lobbytitle').textContent = '🏆 학급 토너먼트 로비';
+  body.appendChild(lel('div', 'note', '우리 반 방 이름을 누르고, 이름을 쓰면 들어가! (방은 선생님이 만들어)'));
   const list = lel('div', 'lrooms');
   if (!L.rooms.length) list.appendChild(lel('div', 'tempty', L.open ? '지금 열린 방이 없어' : '…'));
   for (const r of L.rooms) {
-    const card = lel('div', 'lroom' + (L.focusRoom === r.id ? ' focus' : ''));
+    const open = L.joinFor && L.joinFor.id === r.id, canJoin = r.phase === 'wait';
+    const card = lel('div', 'lroom' + (open ? ' focus' : '') + (canJoin ? ' can' : ' shut'));
     card.appendChild(lel('div', 'lrname', esc(r.name) + (r.locked ? ' 🔒' : '')));
     card.appendChild(lel('div', 'lrinfo', '👩‍🏫 ' + esc(r.host) + ' · 👥 ' + r.count + '명 · ' + roomState(r)));
-    const open = L.joinFor && L.joinFor.id === r.id;
-    if (!open) card.appendChild(lbtn('main', '들어가기', () => { L.joinFor = { id: r.id, locked: r.locked }; L.err = ''; L.msg = ''; lrender(); setTimeout(() => { const i = $('ljname'); if (i) i.focus(); }, 50); }, r.phase !== 'wait'));
-    else {
+    if (!open) {
+      card.appendChild(lel('div', 'lrtap', canJoin ? '👆 눌러서 들어가기' : '지금은 들어갈 수 없어'));
+      if (canJoin) card.addEventListener('click', () => { L.joinFor = { id: r.id, locked: r.locked }; L.err = ''; L.msg = ''; SFX.play('tap'); lrender(); setTimeout(() => { const i = $('ljname'); if (i) i.focus(); }, 50); });
+    } else {
       const f = lel('div', 'ljoin');
       const nm = lel('input', 'bname'); nm.id = 'ljname'; nm.maxLength = 8; nm.placeholder = '내 이름'; nm.value = myName || ''; f.appendChild(nm);
       let pin = null;
@@ -161,8 +163,8 @@ function lviewHost(body) {
   const wrap = lel('div', 'lhost');
   // 왼쪽: 입장 안내(QR)
   const left = lel('div', 'lhleft');
-  const qr = lel('canvas', 'lqr'); qr.width = qr.height = 300; left.appendChild(qr); drawQR(qr, lroomUrl());
-  left.appendChild(lel('div', 'lhow', '📱 카메라로 찍거나<br>로비에서 <b>' + esc(r.name) + '</b> 선택'));
+  left.appendChild(lel('div', 'lhowbox', '<div class="lhstep">① 게임 주소 열기</div><div class="lhurl">' + esc(SITE_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')) + '</div>'
+    + '<div class="lhstep">② 🏆 학급 토너먼트</div><div class="lhstep">③ <b>' + esc(r.name) + '</b> 누르기</div><div class="lhstep">④ 이름 쓰고 입장!</div>'));
   wrap.appendChild(left);
   // 오른쪽: 명단·진행
   const right = lel('div', 'lhright');
@@ -187,18 +189,19 @@ function lviewHost(body) {
     const chips = lel('div', 'bchips');
     for (const t of LTIMES) chips.appendChild(lbtn('sub chip' + (t === r.time ? ' on' : ''), t ? t + '초' : '무제한', () => { r.time = t; lcreateTime = t; lsSet('lobby.time', String(t)); lrender(); }));
     right.appendChild(chips);
-    btns.appendChild(lbtn('main', '▶ 그리기 시작! (' + on + '명)', () => { L.entries = null; lsend({ t: 'start', time: r.time }); SFX.play('round'); }, on < 2));
+    btns.appendChild(lbtn('main', '▶ 그리기 시작! (' + on + '명)', () => { L.entries = null; lsend({ t: 'start', time: r.time }); SFX.play('round'); }, on < 1));
   } else if (r.phase === 'closing') {
   } else if (r.phase === 'draw') {
     btns.appendChild(lbtn('main', '⏹ 지금 마감하기', () => lsend({ t: 'finish' })));
   } else {
     const n = L.entries ? L.entries.length : 0;
-    btns.appendChild(lbtn('main', '🏆 대진표로! (' + n + '명)', lstartTour, n < 2));
+    btns.appendChild(lbtn('main', '🏆 대진표로! (' + n + '명)', lstartTour, n < 1));
     btns.appendChild(lbtn('sub', '🔁 새로 그리기', () => { L.entries = null; lsend({ t: 'reopen' }); }));
   }
   btns.appendChild(lbtn('sub', '방 닫기', () => { lsend({ t: 'close' }); }));
   right.appendChild(btns);
-  if (r.phase === 'battle' && L.entries && L.entries.length < 2) right.appendChild(lel('div', 'note', '보낸 몬스터가 2마리 이상이어야 대진표를 만들 수 있어'));
+  if (r.phase === 'battle' && L.entries && L.entries.length === 1) right.appendChild(lel('div', 'note', '1마리뿐이라 CPU 몬스터와 겨뤄요'));
+  if (r.phase === 'battle' && L.entries && !L.entries.length) right.appendChild(lel('div', 'note', '보낸 몬스터가 없어. 「새로 그리기」로 다시 해 줘'));
   wrap.appendChild(right);
   body.appendChild(wrap);
 }
@@ -290,6 +293,7 @@ function onlineEndDraw(toDone) {
 // ---------- 선생님: 대진표로 ----------
 function lstartTour() {
   const list = (L.entries || []).filter(e => RB.decodeDesign(e.c)).slice(0, TOUR_MAX);
+  if (list.length === 1) { const c = RB.CPU[Math.floor(Math.random() * RB.CPU.length)]; list.push({ c: RB.encodeDesign(c), n: 'CPU ' + c.name }); }   // 혼자면 CPU와
   tour = { entries: list.map(e => ({ c: e.c, n: e.n })), rounds: null, cur: null, champShown: false, lobby: true };
   makeBracket(); saveTour();
   lsend({ t: 'announce', text: '🏆 대진표가 나왔어! ' + list.length + '명 토너먼트 시작' });
