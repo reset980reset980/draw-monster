@@ -103,7 +103,7 @@ function lviewList(body) {
   for (const r of L.rooms) {
     const open = L.joinFor && L.joinFor.id === r.id, canJoin = r.phase === 'wait';
     const card = lel('div', 'lroom' + (open ? ' focus' : '') + (canJoin ? ' can' : ' shut'));
-    card.appendChild(lel('div', 'lrname', esc(r.name) + (r.locked ? ' 🔒' : '')));
+    card.appendChild(lel('div', 'lrname', esc(r.name) + (r.locked ? ' 🔒' : '') + ' <span class="lsite ' + (r.site || '') + '">' + (r.site === 'kids' ? '🔨 놀이터' : '🥊 배틀') + '</span>'));
     card.appendChild(lel('div', 'lrinfo', '👩‍🏫 ' + esc(r.host) + ' · 👥 ' + r.count + '명 · ' + roomState(r)));
     if (!open) {
       card.appendChild(lel('div', 'lrtap', canJoin ? '👆 눌러서 들어가기' : '지금은 들어갈 수 없어'));

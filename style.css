@@ -393,3 +393,6 @@ button.lx { border: 0; background: transparent; font-size: 12px; padding: 0 4px;
 .lhowbox { background: #fff; border: 3px solid var(--ink); border-radius: 14px; padding: 10px 14px; text-align: left; min-width: 220px; }
 .lhstep { font-weight: 900; font-size: clamp(15px, 1.8vw, 22px); margin: 4px 0; }
 .lhurl { font-weight: 900; font-size: clamp(16px, 2.2vw, 28px); color: #1e88e5; margin: 2px 0 8px 1.2em; word-break: break-all; }
+
+.lsite { font-size: 11px; font-weight: 800; padding: 1px 7px; border-radius: 999px; vertical-align: middle; background: #fce4ec; color: #ad1457; }
+.lsite.base { background: #e3f2fd; color: #1565c0; }

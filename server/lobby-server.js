@@ -23,16 +23,16 @@ const tok = () => crypto.randomBytes(12).toString('hex');
 // rooms: id -> { id, site, name, pin, time, hostName, hostToken, host(ws|null), hostGoneAt, phase: 'wait'|'draw'|'battle', endsAt,
 //                players: Map(pid -> { pid, token, name, ws|null, goneAt, code, done }), announce: [], created }
 const rooms = new Map();
-const lobbies = { base: new Set(), kids: new Set() };   // 로비를 보고 있는 소켓
+const lobby = new Set();   // 로비를 보고 있는 소켓 (두 사이트 공용 목록)
 
 const send = (ws, m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
-function lobbyView(site) {
-  return [...rooms.values()].filter(r => r.site === site).map(r => ({
-    id: r.id, name: r.name, host: r.hostName, count: [...r.players.values()].filter(p => p.ws).length,
+function lobbyView() {
+  return [...rooms.values()].map(r => ({
+    id: r.id, site: r.site, name: r.name, host: r.hostName, count: [...r.players.values()].filter(p => p.ws).length,
     phase: r.phase, locked: !!r.pin, hostOnline: !!r.host,
   })).sort((a, b) => (a.phase === 'wait' ? 0 : 1) - (b.phase === 'wait' ? 0 : 1) || a.name.localeCompare(b.name));
 }
-function pushLobby(site) { const m = { t: 'lobby', rooms: lobbyView(site) }; for (const ws of lobbies[site]) send(ws, m); }
+function pushLobby() { const m = { t: 'lobby', rooms: lobbyView() }; for (const ws of lobby) send(ws, m); }
 function roomView(r) {
   return {
     id: r.id, name: r.name, phase: r.phase, time: r.time, endsAt: r.endsAt, hostName: r.hostName, hostOnline: !!r.host, now: Date.now(),
@@ -49,9 +49,9 @@ function closeRoom(r, why) {
   const m = { t: 'closed', why };
   send(r.host, m); for (const p of r.players.values()) { send(p.ws, m); if (p.ws) p.ws._room = null; }
   if (r.host) r.host._room = null;
-  rooms.delete(r.id); pushLobby(r.site);
+  rooms.delete(r.id); pushLobby();
 }
-function leaveLobby(ws) { for (const s of SITES) lobbies[s].delete(ws); }
+function leaveLobby(ws) { lobby.delete(ws); }
 
 // 마감: 시간이 끝났거나 선생님이 「지금 마감」
 // 마감은 두 단계: ① 'closing' — 학생 화면에 마감 신호(자동 제출할 시간 1.5초) ② 'battle' — 모은 몬스터를 선생님께
@@ -67,7 +67,7 @@ function finalizeDraw(r) {
   r.phase = 'battle';
   const entries = [...r.players.values()].filter(p => p.code).map(p => ({ c: p.code, n: p.name }));
   send(r.host, { t: 'entries', entries });
-  pushRoom(r); pushLobby(r.site);
+  pushRoom(r); pushLobby();
 }
 
 const server = http.createServer((req, res) => {
@@ -92,8 +92,8 @@ wss.on('connection', ws => {
     switch (m.t) {
       case 'lobby': {   // 로비 구독
         if (!SITES.has(m.site)) return;
-        leaveLobby(ws); lobbies[m.site].add(ws); ws._site = m.site;
-        send(ws, { t: 'lobby', rooms: lobbyView(m.site) }); break;
+        lobby.add(ws); ws._site = m.site;
+        send(ws, { t: 'lobby', rooms: lobbyView() }); break;
       }
       case 'create': {
         if (!SITES.has(m.site)) return;
@@ -105,7 +105,7 @@ wss.on('connection', ws => {
         const room = { id, site: m.site, name, pin, time, hostName: clean(m.hostName, 10) || '선생님', hostToken: tok(), host: ws, hostGoneAt: 0, phase: 'wait', endsAt: 0, players: new Map(), announce: [], created: now };
         rooms.set(id, room); leaveLobby(ws); ws._room = id; ws._role = 'host';
         send(ws, { t: 'created', id, token: room.hostToken });
-        pushRoom(room); pushLobby(m.site); break;
+        pushRoom(room); pushLobby(); break;
       }
       case 'rehost': {   // 선생님 새로고침 뒤 다시 연결
         const room = rooms.get(m.id);
@@ -114,7 +114,7 @@ wss.on('connection', ws => {
         room.host = ws; room.hostGoneAt = 0; leaveLobby(ws); ws._room = room.id; ws._role = 'host';
         send(ws, { t: 'created', id: room.id, token: room.hostToken });
         if (room.phase === 'battle') send(ws, { t: 'entries', entries: [...room.players.values()].filter(p => p.code).map(p => ({ c: p.code, n: p.name })), resume: true });
-        pushRoom(room); pushLobby(room.site); break;
+        pushRoom(room); pushLobby(); break;
       }
       case 'join': {
         const room = rooms.get(m.id);
@@ -126,7 +126,7 @@ wss.on('connection', ws => {
             if (p.ws && p.ws !== ws) { p.ws._room = null; send(p.ws, { t: 'closed', why: '다른 화면에서 들어왔어' }); }
             p.ws = ws; p.goneAt = 0; leaveLobby(ws); ws._room = room.id; ws._role = 'player'; ws._pid = p.pid;
             send(ws, { t: 'joined', id: room.id, pid: p.pid, token: p.token, name: p.name, done: !!p.code });
-            pushRoom(room); pushLobby(room.site); return;
+            pushRoom(room); pushLobby(); return;
           }
         }
         if (room.pin && String(m.pin || '') !== room.pin) return send(ws, { t: 'error', msg: '비밀번호가 달라', pin: true });
@@ -137,12 +137,12 @@ wss.on('connection', ws => {
         const pid = rid(), p = { pid, token: tok(), name, ws, goneAt: 0, code: '' };
         room.players.set(pid, p); leaveLobby(ws); ws._room = room.id; ws._role = 'player'; ws._pid = pid;
         send(ws, { t: 'joined', id: room.id, pid, token: p.token, name, done: false });
-        pushRoom(room); pushLobby(room.site); break;
+        pushRoom(room); pushLobby(); break;
       }
       case 'leave': {
         if (!r) return;
         if (ws._role === 'host') closeRoom(r, '선생님이 방을 닫았어');
-        else { r.players.delete(ws._pid); ws._room = null; pushRoom(r); pushLobby(r.site); }
+        else { r.players.delete(ws._pid); ws._room = null; pushRoom(r); pushLobby(); }
         break;
       }
       // ---- 선생님만 ----
@@ -152,20 +152,20 @@ wss.on('connection', ws => {
         r.time = time; r.phase = 'draw'; r.endsAt = time ? now + time * 1000 : 0; r.announce = [];
         for (const p of r.players.values()) p.code = '';
         for (const p of r.players.values()) send(p.ws, { t: 'drawStart', endsAt: r.endsAt, time, now });
-        pushRoom(r); pushLobby(r.site); break;
+        pushRoom(r); pushLobby(); break;
       }
       case 'finish': { if (r && ws._role === 'host') finishDraw(r); break; }
       case 'reopen': {   // 다시 대기실로 (새 대결 준비, 새 친구 입장 가능)
         if (!r || ws._role !== 'host') return;
         r.phase = 'wait'; r.endsAt = 0; for (const p of r.players.values()) p.code = '';
         for (const p of r.players.values()) send(p.ws, { t: 'waitAgain' });
-        pushRoom(r); pushLobby(r.site); break;
+        pushRoom(r); pushLobby(); break;
       }
       case 'kick': {
         if (!r || ws._role !== 'host') return;
         const p = r.players.get(m.pid); if (!p) return;
         send(p.ws, { t: 'closed', why: '선생님이 방에서 내보냈어' }); if (p.ws) p.ws._room = null;
-        r.players.delete(m.pid); pushRoom(r); pushLobby(r.site); break;
+        r.players.delete(m.pid); pushRoom(r); pushLobby(); break;
       }
       case 'announce': {
         if (!r || ws._role !== 'host') return;
@@ -193,7 +193,7 @@ wss.on('connection', ws => {
     const r = ws._room ? rooms.get(ws._room) : null; if (!r) return;
     if (ws._role === 'host' && r.host === ws) { r.host = null; r.hostGoneAt = Date.now(); }
     if (ws._role === 'player') { const p = r.players.get(ws._pid); if (p && p.ws === ws) { p.ws = null; p.goneAt = Date.now(); } }
-    pushRoom(r); pushLobby(r.site);
+    pushRoom(r); pushLobby();
   });
 });
 
@@ -208,7 +208,7 @@ setInterval(() => {
     if (!r.host && r.hostGoneAt && now - r.hostGoneAt > HOST_GRACE) { closeRoom(r, '선생님이 나가서 방이 닫혔어'); continue; }
     let changed = false;
     for (const [pid, p] of r.players) if (!p.ws && p.goneAt && now - p.goneAt > PLAYER_GRACE && r.phase === 'wait') { r.players.delete(pid); changed = true; }
-    if (changed) { pushRoom(r); pushLobby(r.site); }
+    if (changed) { pushRoom(r); pushLobby(); }
     if (now - r.created > 6 * 3600e3) closeRoom(r, '방이 오래되어 닫혔어');
   }
 }, 1000);
