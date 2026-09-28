@@ -1,0 +1,8 @@
+[Unit]
+Description=Ensure monster.xsw.kr Caddy route exists
+After=network-online.target monster-lobby.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/projects/monster-lobby/ensure-route.py
+NoNewPrivileges=true

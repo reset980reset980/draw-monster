@@ -1,0 +1,17 @@
+[Unit]
+Description=그려라! 몬스터 교실 로비 서버 (monster.xsw.kr)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/monster-lobby
+Environment=PORT=8793
+Environment=ALLOWED_ORIGINS=https://draw-monster-seven.vercel.app,https://monster-playground.vercel.app,https://monster.xsw.kr
+ExecStart=/usr/bin/node %h/projects/monster-lobby/lobby-server.js
+Restart=always
+RestartSec=3
+StandardOutput=append:%h/projects/monster-lobby/lobby.log
+StandardError=append:%h/projects/monster-lobby/lobby.log
+
+[Install]
+WantedBy=default.target

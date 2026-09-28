@@ -6,13 +6,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#15173a">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=44">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=l1">
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-title" content="몬스터 배틀">
 <meta property="og:title" content="그려라! 몬스터 배틀">
 <meta property="og:description" content="몸·팔·다리를 그려서 몬스터를 만들자! 몬스터가 걸어가서 펀치로 싸워. 친구에게 몬스터를 보내서 한판 붙자!">
 <title>그려라! 몬스터 배틀</title>
-<link rel="stylesheet" href="style.css?v=44">
+<link rel="stylesheet" href="style.css?v=l1">
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -32,6 +32,7 @@
     <div class="tbtns">
       <button id="start" class="main">몬스터 만들기</button>
       <button id="vs" class="sub vsbtn">둘이서 대결</button>
+      <button id="lobbybtn" class="sub lobbybtn">🌐 교실 대결 (각자 기기로)</button>
       <button id="tourbtn" class="sub tourbtn">🏆 학급 토너먼트</button>
       <button id="boardbtn" class="sub boardbtn">🖥️ 전자칠판 대결</button>
     </div>
@@ -143,6 +144,14 @@
   <div class="brotate">화면을 가로로 돌려 줘 ↻<br><small>전자칠판 대결은 가로 화면 전용이야</small></div>
 </div>
 
+<div id="lobbybox" hidden>
+  <div class="panel">
+    <div class="rtitle" id="lobbytitle">🌐 교실 대결 로비</div>
+    <div id="lobbybody"></div>
+  </div>
+</div>
+<div id="otimer" hidden></div>
+
 <div id="tourbox" hidden>
   <div class="panel">
     <div class="rtitle">🏆 학급 토너먼트</div>
@@ -164,11 +173,12 @@
   </div>
 </div>
 
-<script src="sim.js?v=44"></script>
-<script src="sfx.js?v=44"></script>
-<script src="qrcode.js?v=44"></script>
-<script src="game.js?v=44"></script>
-<script src="tour.js?v=44"></script>
-<script src="board.js?v=44"></script>
+<script src="sim.js?v=l1"></script>
+<script src="sfx.js?v=l1"></script>
+<script src="qrcode.js?v=l1"></script>
+<script src="game.js?v=l1"></script>
+<script src="tour.js?v=l1"></script>
+<script src="board.js?v=l1"></script>
+<script src="lobby.js?v=l1"></script>
 </body>
 </html>

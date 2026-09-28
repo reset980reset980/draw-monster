@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore monster.xsw.kr Caddy route after proxy restarts
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=monster-lobby-route.service
+
+[Install]
+WantedBy=timers.target

@@ -2,7 +2,7 @@
 // 참가: ① 이 기기에서 돌아가며 그리기 ② 내 몬스터 ③ 받은 친구 몬스터 ④ 공유 링크 붙여넣기(여러 개 한 번에)
 // 경기는 물리가 결정적이라, 직접 보나 결과만 내나 승자가 같음
 'use strict';
-const TOUR_MAX = 16;
+const TOUR_MAX = 32;
 const TOUR_COLORS = ['#1e88e5', '#e53935', '#43a047', '#fb8c00', '#8e24aa', '#00acc1', '#f4511e', '#3949ab', '#7cb342', '#d81b60', '#6d4c41', '#00897b', '#fdd835', '#5e35b1', '#c0ca33', '#546e7a'];
 // tour = { entries: [{ c: 설계 코드, n: 이름 }], rounds: [[{ a, b, w, res }]] | null, cur: { r, m } | null, champShown }
 let tour = loadTour();
@@ -19,7 +19,7 @@ const tName = i => tour.entries[i].n;
 
 function roundName(r) {
   const k = tour.rounds[r].length;
-  return k === 1 ? '결승' : k === 2 ? '4강' : k === 4 ? '8강' : '16강';
+  return k === 1 ? '결승' : k === 2 ? '4강' : k === 4 ? '8강' : k === 8 ? '16강' : '32강';
 }
 function addEntry(code, name) {
   if (tour.entries.length >= TOUR_MAX) return '참가자는 ' + TOUR_MAX + '마리까지야';

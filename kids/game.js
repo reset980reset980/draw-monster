@@ -1,6 +1,6 @@
 // かいて！モンスターバトル — 描く画面（からだ・うで・あし）・バトルの描画・勝ち抜き・モンスターを送る
 'use strict';
-const VERSION = '2';
+const VERSION = 'l1';
 // あそびの きろく（/t.js。なくても うごく）
 window.T_VER = VERSION;
 function TR(e, d) { try { if (window.T) window.T(e, d); } catch (err) {} }
@@ -87,7 +87,7 @@ function resize() {
   sizePad(); if (mode === 'draw') drawPad();
 }
 window.addEventListener('resize', resize);
-function show(id) { document.body.classList.toggle('inbattle', id === 'none'); if (id === 'result') $('rhome').hidden = !!(S && S.side === 'vs'); document.body.classList.toggle('boardmode', id === 'board' || id === 'boardsetup'); document.body.classList.toggle('bigui', id === 'board' || id === 'boardsetup' || ((id === 'result' || id === 'none') && !!S && S.side === 'board')); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff', 'tourbox', 'board', 'boardsetup']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
+function show(id) { document.body.classList.toggle('inbattle', id === 'none'); if ($('otimer') && id !== 'draw') $('otimer').hidden = true; if (id === 'result') $('rhome').hidden = !!(S && S.side === 'vs'); document.body.classList.toggle('boardmode', id === 'board' || id === 'boardsetup'); document.body.classList.toggle('bigui', id === 'board' || id === 'boardsetup' || ((id === 'result' || id === 'none') && !!S && S.side === 'board')); for (const k of ['title', 'draw', 'result', 'sharebox', 'slotbox', 'handoff', 'tourbox', 'board', 'boardsetup', 'lobbybox']) $(k).hidden = k !== id; $('quit').hidden = id !== 'none'; $('fast').hidden = id !== 'none' || !canFast(); updateFastBtn(); }
 // はやおくり: 一度でも倒した CPU との戦いだけ
 function canFast() { if (mode !== 'battle' || !S) return false; if (S.side === 'tour') return true; return !isFriend && !!beaten[S.stage != null ? S.stage : stage]; }
 function updateFastBtn() { $('fast').textContent = fast ? '▶ 보통 속도' : '▶▶ 빨리 감기'; $('fast').classList.toggle('on', fast); }
@@ -746,7 +746,7 @@ onTap($('start'), showDraw);
 // タイトルの文字を 5 回つづけてタップ → うら テストの印（ホーム画面のアプリは Safari と保存場所が別なので）
 { let n = 0, t0 = 0; $('title').querySelector('.logo').addEventListener('click', () => { const now = Date.now(); n = now - t0 < 800 ? n + 1 : 1; t0 = now; if (n >= 5) { n = 0; lsSet('uratest', '1'); URA_TEST = true; uraOpen = true; showTitle(); } }); }
 onTap($('back'), () => { if (tourDraw) tourDrawCancel(); else if (vs) exitVs(); else showTitle(); });
-onTap($('fight'), () => { if (tourDraw) tourDrawDone(); else if (vs) vsNext(); else startBattle(false); });
+onTap($('fight'), () => { if (typeof onlineDraw !== 'undefined' && onlineDraw) { lsubmit(); return; } if (tourDraw) tourDrawDone(); else if (vs) vsNext(); else startBattle(false); });
 onTap($('fightfriend'), () => startBattle(true));
 onTap($('send'), shareRobot);
 onTap($('share'), shareRobot);
@@ -908,7 +908,7 @@ function updateSideUi() {
   $('sidebtn').classList.toggle('ura', side === 'ura');
   $('fight').innerHTML = (side === 'ura' ? '히든 ' : '') + '겨루기<small>' + (stage + 1) + ' / ' + CPUS().length + ' ' + CPUS()[stage].name + '</small>';
   $('fight').classList.toggle('ura', side === 'ura');
-  applyVsUi(); if (typeof applyTourUi === 'function') applyTourUi();
+  applyVsUi(); if (typeof applyTourUi === 'function') applyTourUi(); if (typeof applyOnlineUi === 'function') applyOnlineUi();
 }
 // おもて ⇄ うら（押すたびに切りかえ）
 onTap($('sidebtn'), () => { side = side === 'ura' ? 'omote' : 'ura'; lsSet('side', side); loadSide(); updateSideUi(); setHint(side === 'ura' ? '히든 연승전: 엄청나게 센 5마리' : ''); });
